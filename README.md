@@ -1,135 +1,133 @@
 # EMG Two Hands
 
-两只 8 通道 EMG 手环驱动的桌面端采集/识别程序与网页音乐游戏。
+面向双手 8 通道 EMG 手环的项目：包含实时桌面端（串口接收、可视化、采集、录制与手势识别）以及接收手势事件的网页音乐游戏。
 
-本文件是目录迁移前后的**运行与验证基线**。迁移任何路径后，都应从本文件的“验证基线”开始重新检查；不要以旧目录中的虚拟环境或训练产物是否存在作为成功标准。
+## 目录
 
-## 当前代码位置
+```text
+.
+├── apps/
+│   ├── desktop/                 # Python 桌面端，可安装包 emg_live_marker
+│   └── web-game/                # 网页游戏和轻量演示 API
+├── data/
+│   ├── datasets/                # 原始训练数据（不提交 Git）
+│   ├── recordings/              # 桌面端录制数据（不提交 Git）
+│   ├── README.md
+│   └── migration-manifest.csv   # 已迁移数据的校验清单
+├── artifacts/                   # 产物说明与历史产物索引；实际大文件不提交 Git
+│   ├── README.md
+│   └── artifact_manifest.csv
+├── docs/
+├── third_party/                 # 外部工程，例如 EffiE（不提交 Git）
+└── README.md
+```
 
-- Python 桌面端：`apps/desktop/`
-- 网页游戏与轻量调试 API：`apps/web-game/`
-- 桌面端会在 `http://127.0.0.1:8766/events` 提供手势 SSE。
-- 网页游戏优先连接 8766；连接失败时回退到轻量 API 的 `http://127.0.0.1:8765/events`。
+桌面端采用 `src/` 布局：包代码位于 `apps/desktop/src/emg_live_marker/`，命令入口位于 `apps/desktop/scripts/`。请不要再依赖旧的嵌套目录或 `sys.path` 修改。
 
-## Python 与依赖安装
+## 环境与安装
 
-项目声明的最低 Python 版本是 **3.10**（见 `apps/desktop/pyproject.toml`）。此项目统一使用 Conda 环境 **BN5213**：
+项目统一使用已有 Conda 环境 **BN5213**，当前验证的解释器为 Python **3.10.19**：
 
 ```bash
 PYTHON=/Applications/anaconda3/envs/BN5213/bin/python
 $PYTHON --version
-$PYTHON -m pip install -e apps/desktop
+
+# 依赖已在 BN5213 中安装时使用；以可编辑模式安装桌面端包
+$PYTHON -m pip install --no-deps -e apps/desktop
 ```
 
-此环境当前为 Python **3.10.19**。本次检查发现其缺少 `PySide6`、`pyqtgraph`、`pyserial` 和 `ruff`；这些依赖**没有被自动安装**。补齐依赖前，桌面 GUI、完整测试与可编辑安装的端到端验证都无法完成。
+依赖声明见 [`apps/desktop/pyproject.toml`](</Volumes/UBUNTU-SERV/EMG_two hands/apps/desktop/pyproject.toml>)：PySide6、pyqtgraph、pyserial、NumPy、SciPy、PyTorch；开发依赖为 pytest 和 ruff。若 BN5213 缺少依赖，请先确认后再安装，不要使用项目内旧的 `venv/`（该目录已移除）。
 
-后续所有命令均在设置了上述 `PYTHON` 变量的同一终端中执行。应用采用 `src/` 布局；完成可编辑安装后，运行时与测试应从已安装的 `emg_live_marker` 包导入代码，而不是依赖工程目录在 `sys.path` 中。
+下面所有 Python 命令都假设 `PYTHON` 已按上方设置，并从仓库根目录执行；可编辑安装完成后不依赖当前工作目录。
 
-如需单独创建本机环境，仍可在明确授权后使用以下方式；默认不替代 BN5213：
-
-```bash
-cd apps/desktop
-python -m venv .venv
-
-# macOS / Linux
-source .venv/bin/activate
-
-# Windows PowerShell（替代上一行）
-# .\.venv\Scripts\Activate.ps1
-
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
-
-仓库中的 `apps/desktop/venv/` 是 Windows 可执行文件格式，不能在 macOS 上复用；请创建上述 `.venv/`。两种环境目录都被 `.gitignore` 排除。
-
-依赖包括 PySide6、pyqtgraph、pyserial、NumPy、SciPy、PyTorch；开发依赖包括 pytest 和 ruff。
-
-## 启动方式
-
-### 桌面端
+## 启动桌面端
 
 ```bash
-cd apps/desktop
-
-# 不接硬件：使用模拟数据启动
+# 无硬件：模拟 EMG 数据
 $PYTHON -m emg_live_marker --simulate
 
-# 真实串口：示例端口名请替换为实际设备
+# 实际设备：替换为实际串口名
 $PYTHON -m emg_live_marker --port /dev/cu.usbserial-XXXX --baudrate 921600
 
 # Windows 示例
 # $PYTHON -m emg_live_marker --port COM4 --baudrate 921600
 ```
 
-不带参数启动时，当前实现也会进入模拟模式。桌面端打开后会启动本地 SSE 服务（8766），供网页游戏接收左右手手势。
+不带参数也会启动模拟数据源。桌面端启动本地 SSE 服务 `http://127.0.0.1:8766/events`，向网页游戏发送左右手手势事件。
 
-### Web 游戏
+桌面窗口中的 **Start Recording** 会将录制写入 `data/recordings/YYYY-MM-DD_HH-MM-SS/`；**Start Collection** 会将采集写入 `data/datasets/<subject_id>/<session_id>/`。一个会话通常包含 `metadata.json`、`emg.csv`、`imu.csv`、`events.csv` 和 `raw_packets.bin`。
 
-推荐通过静态 HTTP 服务打开网页，而不是直接双击 HTML 文件：
+## 启动网页游戏
+
+建议经由本地 HTTP 服务启动，而不是直接双击 HTML：
 
 ```bash
-# 在仓库根目录执行
-python -m http.server 8000 --directory apps/web-game
+$PYTHON -m http.server 8000 --directory apps/web-game
 ```
 
-然后浏览器访问 `http://127.0.0.1:8000`。如桌面端正在运行，网页会连接其 8766 SSE 服务。
-
-没有桌面端或硬件时，可启动轻量演示桥接：
+浏览器访问 <http://127.0.0.1:8000>。网页会优先订阅桌面端的 8766 SSE 服务；当桌面端未启动时，可用轻量演示桥接：
 
 ```bash
-# 终端 A：仓库根目录
-python apps/web-game/emg_api.py --host 127.0.0.1 --port 8765
+# 终端 A：启动演示 API
+$PYTHON apps/web-game/emg_api.py --host 127.0.0.1 --port 8765
 
-# 终端 B：向网页发送一条模拟手势
-python apps/web-game/send_demo_gesture.py fist 0.93 --hand left
+# 终端 B：发送一条模拟手势
+$PYTHON apps/web-game/send_demo_gesture.py fist 0.93 --hand left
 ```
 
-### 录制与采集
+## 训练、微调与评估
 
-当前没有独立的录制命令行脚本。启动桌面端后，在窗口中使用：
-
-- **Start Recording**：写入录制根目录下的 `YYYY-MM-DD_HH-MM-SS/`；
-- **Start Collection**：写入数据集根目录下的 `<subject_id>/<session_id>/`，用于训练。
-
-每个会话包含 `metadata.json`、`emg.csv`、`imu.csv`、`events.csv` 与 `raw_packets.bin`。这些都是本地数据产物，当前不应提交到 Git。
-
-## 训练与离线评估
-
-以下命令均从 Python 工程根目录执行：
+所有训练命令可使用 `--dataset-root`、`--recordings-root`、`--artifacts-root` 和 `--paths-config` 覆盖默认路径。
 
 ```bash
-cd apps/desktop
-
-# 常规训练；不传 --output-dir 会自动生成含 model/split/mode/timestamp/seed 的 run ID
-$PYTHON scripts/train_gesture_classifier.py \
+# 常规手势分类训练；默认自动生成 run ID
+$PYTHON -m emg_live_marker.cli.train_gesture_classifier \
   --dataset-root data/datasets \
   --device auto
 
-# EffiE 微调；需要自行提供外部 EffiE 工程和 checkpoint
-$PYTHON scripts/finetune_effie_gesture.py \
+# 面向同日校准数据的训练预设
+$PYTHON -m emg_live_marker.cli.train_gesture_classifier \
   --dataset-root data/datasets \
-  --effie-root ../../third_party/EffiE \
-  --checkpoint-path ../../third_party/EffiE/checkpoints/<checkpoint_file> \
+  --preset calibration \
   --device auto
 
-# 回放评估实时平滑效果
-$PYTHON scripts/evaluate_realtime_smoothing.py \
+# EffiE 微调：需要自行提供外部 EffiE 工程和 checkpoint
+$PYTHON -m emg_live_marker.cli.finetune_effie_gesture \
   --dataset-root data/datasets \
-  --model-path apps/desktop/models/<run_id>/gesture_classifier.ts \
-  --output-dir apps/desktop/reports/<run_id> \
+  --effie-root third_party/EffiE \
+  --checkpoint-path third_party/EffiE/checkpoints/<checkpoint_file> \
+  --mode freeze_backbone \
+  --device auto
+
+# 用录制会话回放评估实时平滑；替换为实际模型路径
+$PYTHON -m emg_live_marker.cli.evaluate_realtime_smoothing \
+  --dataset-root data/datasets \
+  --model-path artifacts/models/<run_id>/gesture_classifier.ts \
+  --output-dir artifacts/reports/<run_id> \
   --session session_001
 ```
 
-## 数据与产物路径
+也可以使用安装后的控制台命令，例如 `emg-train-gesture-classifier`、`emg-finetune-effie-gesture` 和 `emg-evaluate-realtime-smoothing`。
 
-路径不依赖执行命令时的当前目录。数据已迁移后，默认位置为：
+未传 `--output-dir` 时，训练与 EffiE 微调会生成：
 
-- dataset：`data/datasets`
-- recordings：`data/recordings`
-- artifacts：`apps/desktop` （其中 `models/` 与 `reports/` 为模型和报告目录）
+```text
+{model}__{split}__{mode}__{timestamp}__seed-{seed}
+```
 
-优先级从高到低是：命令行 `--dataset-root` / `--recordings-root` / `--artifacts-root`、路径配置文件、环境变量、上述默认值。本机可在仓库根目录创建未跟踪的 `.emg-paths.json`：
+例如要将新产物直接写入根目录 `artifacts/`，加入 `--artifacts-root artifacts`。历史模型和报告暂未批量改名或迁移；参见 [`artifacts/artifact_manifest.csv`](</Volumes/UBUNTU-SERV/EMG_two hands/artifacts/artifact_manifest.csv>)。
+
+## 数据和路径配置
+
+默认路径由代码相对仓库根目录解析，不依赖“在哪个目录执行命令”：
+
+| 用途 | 默认位置 |
+| --- | --- |
+| 训练数据 | `data/datasets` |
+| 录制数据 | `data/recordings` |
+| 模型与报告默认根 | `apps/desktop` |
+
+路径优先级为：命令行参数 > JSON 配置文件 > 环境变量 > 默认值。可在仓库根目录创建本机私有的 `.emg-paths.json`（已被 Git 忽略）：
 
 ```json
 {
@@ -139,66 +137,50 @@ $PYTHON scripts/evaluate_realtime_smoothing.py \
 }
 ```
 
-对应的环境变量是 `EMG_DATASET_ROOT`、`EMG_RECORDINGS_ROOT`、`EMG_ARTIFACTS_ROOT`；用 `EMG_PATHS_CONFIG` 或 `--paths-config` 可选择其他 JSON 配置文件。模型与报告分别位于 `artifacts_root/models` 和 `artifacts_root/reports`。
+对应环境变量为 `EMG_DATASET_ROOT`、`EMG_RECORDINGS_ROOT`、`EMG_ARTIFACTS_ROOT`；通过 `EMG_PATHS_CONFIG` 或 `--paths-config` 可选用其他配置文件。数据迁移过程与完整性校验见 [`data/migration-manifest.csv`](</Volumes/UBUNTU-SERV/EMG_two hands/data/migration-manifest.csv>)。
 
-新训练默认使用 `{model}__{split}__{mode}__{timestamp}__seed-{seed}` 作为输出目录名。当历史产物审核完成后，可用 `--artifacts-root artifacts` 将新产物直接写入根目录 `artifacts/`。
+## 已验证基线（2026-08-27）
 
-## 验证基线
+在 BN5213 / Python 3.10.19 下已确认：
 
-### 已通过的自动测试
-
-在 2026-08-27、BN5213 Python 3.10.19 下，以下临时结构验证命令通过：
+- `pip install --no-deps -e apps/desktop` 成功；
+- 无显示器模式可创建并关闭桌面主窗口，`MainWindow(simulate=False)` 已成功初始化；
+- 路径配置、运行命名和训练产物保存的针对性测试通过：6 passed；
+- 9 个数据集会话可由已安装包从仓库外的当前目录发现；首个会话 EMG 数组形状为 `(96869, 8)`；
+- 当前完整测试套件尚未作为一次全量、无告警的验收重新跑完；继续迁移或改动前，应先运行下列命令。
 
 ```bash
-cd apps/desktop
-PYTHONPATH=src $PYTHON -m pytest -q \
-  tests/test_processing.py \
-  tests/test_protocol.py \
-  tests/test_realtime_smoothing_eval.py \
-  tests/test_ring_buffer.py \
-  tests/test_stream_processor.py
+QT_QPA_PLATFORM=offscreen PYTHONDONTWRITEBYTECODE=1 \
+  $PYTHON -m pytest -q apps/desktop/tests
 ```
 
-结果：**38 passed in 14.04s**。`PYTHONPATH=src` 仅用于本次未安装依赖时验证 `src/` 导入结构；它不是日常运行方式。
-
-补齐依赖并完成可编辑安装后，日常与 CI 验证统一使用：
+最小模拟数据 smoke test（不需要硬件）：
 
 ```bash
-cd apps/desktop
-QT_QPA_PLATFORM=offscreen $PYTHON -m pytest -q
-```
+# 终端 A
+$PYTHON apps/web-game/emg_api.py --host 127.0.0.1 --port 8765
 
-本次尚未能完整执行：当前验证环境缺少 `PySide6`、`pyqtgraph` 和 `pyserial`，使 5 个 GUI/解码器测试模块在收集时失败。安装本节前述依赖后，应重新执行完整命令。
-
-### 最小模拟数据 smoke test
-
-此测试验证轻量桥接能够接收并分类一条合成的 8 通道 EMG 样本。它不验证已训练模型，也不替代桌面 GUI 验证。
-
-```bash
-# 终端 A：仓库根目录
-python apps/web-game/emg_api.py --host 127.0.0.1 --port 8765
-
-# 终端 B
+# 终端 B；预期 HTTP 200 与 ok: true
 curl --fail --silent --show-error \
   -X POST http://127.0.0.1:8765/emg \
   -H 'Content-Type: application/json' \
   --data '{"samples":[[0.9,0.9,0.9,0.9,0.9,0.9,0.9,0.9]],"hand":"left"}'
 ```
 
-本次实际返回 HTTP 200，响应为 `ok: true`，并将样本判为 `open-palm`（置信度是演示 API 的随机值）。使用 `Ctrl-C` 停止临时服务。
+## Git 约定
 
-## Git 与迁移卫生检查
+`.gitignore` 只会阻止未跟踪文件进入 Git，不会自动移除已经被跟踪的文件。原始数据、录制数据、模型、报告和常见生成物均应保留在本地或专用存储中，不能当作普通 Git 源码提交。
 
-`.gitignore` 只会阻止**尚未跟踪**的文件进入 Git，不能自动停止跟踪已提交过的文件。每次迁移前后执行：
+检查已跟踪的残留文件：
 
 ```bash
 git ls-files | grep -E '(^|/)(venv|__pycache__|\.idea|data|artifacts)/|\.egg-info/|/\._' || true
 ```
 
-本分支当前的结果为空：没有这些生成物被 Git 跟踪。如果未来发现明确不应进入仓库的已跟踪生成物，只取消跟踪而保留本地文件，例如：
+当前结果不包含虚拟环境、缓存、IDE 元数据、`._*` 或 `*.egg-info`。`data/README.md`、迁移清单、`artifacts/README.md` 与产物索引是有意跟踪的元数据；原始数据和大产物仍被忽略。若确认某个已跟踪生成物不应在 Git 中，只取消跟踪并保留本地文件，例如：
 
 ```bash
 git rm -r --cached -- apps/desktop/venv
 ```
 
-不要对 `dataset/`、`recordings/` 或其他不确定的数据目录批量执行 `git rm --cached`；先确认其用途、备份和数据保留策略。
+不要对不确定的数据目录批量执行 `git rm --cached`。
