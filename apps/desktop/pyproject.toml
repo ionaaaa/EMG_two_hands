@@ -25,16 +25,21 @@ dev = [
 
 [project.scripts]
 emg-live-marker = "emg_live_marker.__main__:main"
+emg-compare-gesture-models = "emg_live_marker.cli.compare_gesture_models:main"
+emg-evaluate-realtime-smoothing = "emg_live_marker.cli.evaluate_realtime_smoothing:main"
+emg-finetune-effie-gesture = "emg_live_marker.cli.finetune_effie_gesture:main"
+emg-import-effie = "emg_live_marker.cli.import_effie:main"
+emg-inspect-gesture-dataset = "emg_live_marker.cli.inspect_gesture_dataset:main"
+emg-train-gesture-classifier = "emg_live_marker.cli.train_gesture_classifier:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["emg_live_marker*"]
 
 [tool.setuptools.package-data]
 emg_live_marker = ["assets/*.jpg"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-p no:cacheprovider"
 

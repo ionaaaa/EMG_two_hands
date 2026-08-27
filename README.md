@@ -13,9 +13,19 @@
 
 ## Python 与依赖安装
 
-项目声明的最低 Python 版本是 **3.10**（见 `apps/desktop/pyproject.toml`）。本分支的验证使用 Conda Python **3.11.5**。
+项目声明的最低 Python 版本是 **3.10**（见 `apps/desktop/pyproject.toml`）。此项目统一使用 Conda 环境 **BN5213**：
 
-从 Python 工程目录创建一个新的本机虚拟环境：
+```bash
+PYTHON=/Applications/anaconda3/envs/BN5213/bin/python
+$PYTHON --version
+$PYTHON -m pip install -e apps/desktop
+```
+
+此环境当前为 Python **3.10.19**。本次检查发现其缺少 `PySide6`、`pyqtgraph`、`pyserial` 和 `ruff`；这些依赖**没有被自动安装**。补齐依赖前，桌面 GUI、完整测试与可编辑安装的端到端验证都无法完成。
+
+后续所有命令均在设置了上述 `PYTHON` 变量的同一终端中执行。应用采用 `src/` 布局；完成可编辑安装后，运行时与测试应从已安装的 `emg_live_marker` 包导入代码，而不是依赖工程目录在 `sys.path` 中。
+
+如需单独创建本机环境，仍可在明确授权后使用以下方式；默认不替代 BN5213：
 
 ```bash
 cd apps/desktop
@@ -43,13 +53,13 @@ python -m pip install -e ".[dev]"
 cd apps/desktop
 
 # 不接硬件：使用模拟数据启动
-python -m emg_live_marker --simulate
+$PYTHON -m emg_live_marker --simulate
 
 # 真实串口：示例端口名请替换为实际设备
-python -m emg_live_marker --port /dev/cu.usbserial-XXXX --baudrate 921600
+$PYTHON -m emg_live_marker --port /dev/cu.usbserial-XXXX --baudrate 921600
 
 # Windows 示例
-# python -m emg_live_marker --port COM4 --baudrate 921600
+# $PYTHON -m emg_live_marker --port COM4 --baudrate 921600
 ```
 
 不带参数启动时，当前实现也会进入模拟模式。桌面端打开后会启动本地 SSE 服务（8766），供网页游戏接收左右手手势。
@@ -92,21 +102,21 @@ python apps/web-game/send_demo_gesture.py fist 0.93 --hand left
 cd apps/desktop
 
 # 常规训练；输出目录请使用新的、语义明确的实验名
-python scripts/train_gesture_classifier.py \
+$PYTHON scripts/train_gesture_classifier.py \
   --dataset-root emg_live_marker/dataset \
   --output-dir models/<run_id> \
   --device auto
 
 # EffiE 微调；需要自行提供外部 EffiE 工程和 checkpoint
-python scripts/finetune_effie_gesture.py \
+$PYTHON scripts/finetune_effie_gesture.py \
   --dataset-root emg_live_marker/dataset \
-  --effie-root external_models/EffiE \
-  --checkpoint-path external_models/EffiE/checkpoints/<checkpoint_file> \
+  --effie-root ../../third_party/EffiE \
+  --checkpoint-path ../../third_party/EffiE/checkpoints/<checkpoint_file> \
   --output-dir models/<run_id> \
   --device auto
 
 # 回放评估实时平滑效果
-python scripts/evaluate_realtime_smoothing.py \
+$PYTHON scripts/evaluate_realtime_smoothing.py \
   --dataset-root emg_live_marker/dataset \
   --model-path models/<run_id>/gesture_classifier.ts \
   --output-dir reports/<run_id> \
@@ -119,11 +129,11 @@ python scripts/evaluate_realtime_smoothing.py \
 
 ### 已通过的自动测试
 
-在 2026-08-27、Conda Python 3.11.5 下，以下命令通过：
+在 2026-08-27、BN5213 Python 3.10.19 下，以下临时结构验证命令通过：
 
 ```bash
 cd apps/desktop
-python -m pytest -q \
+PYTHONPATH=src $PYTHON -m pytest -q \
   tests/test_processing.py \
   tests/test_protocol.py \
   tests/test_realtime_smoothing_eval.py \
@@ -131,13 +141,13 @@ python -m pytest -q \
   tests/test_stream_processor.py
 ```
 
-结果：**38 passed in 5.60s**。
+结果：**38 passed in 14.04s**。`PYTHONPATH=src` 仅用于本次未安装依赖时验证 `src/` 导入结构；它不是日常运行方式。
 
-完整测试命令为：
+补齐依赖并完成可编辑安装后，日常与 CI 验证统一使用：
 
 ```bash
 cd apps/desktop
-QT_QPA_PLATFORM=offscreen python -m pytest -q
+QT_QPA_PLATFORM=offscreen $PYTHON -m pytest -q
 ```
 
 本次尚未能完整执行：当前验证环境缺少 `PySide6`、`pyqtgraph` 和 `pyserial`，使 5 个 GUI/解码器测试模块在收集时失败。安装本节前述依赖后，应重新执行完整命令。

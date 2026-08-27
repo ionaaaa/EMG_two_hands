@@ -1,2 +1,1 @@
-"""Command-line helper scripts for emg_live_marker."""
-
+"""Thin launch scripts for the installed ``emg_live_marker`` package."""

@@ -1,22 +1,23 @@
 # EffiE External Model Integration
 
-This folder contains glue code for using public EffiE-style sEMG models without
-vendoring the full external repository into `emg_live_marker`.
+The installed `emg_live_marker` package contains glue code for using public
+EffiE-style sEMG models without vendoring the full external repository.
 
 Target upstream:
 
 ```powershell
-git clone https://github.com/MIC-Laboratory/IEEE-NER-2023-EffiE external_models\EffiE
-dir external_models\EffiE\checkpoints
+git clone https://github.com/MIC-Laboratory/IEEE-NER-2023-EffiE third_party\EffiE
+dir third_party\EffiE\checkpoints
 ```
 
 The main application does not depend on TensorFlow. If you have an EffiE
-TensorFlow/Keras checkpoint, use `import_effie.py` as a conversion helper. The
-fine-tuning path itself uses the PyTorch adapter in:
+TensorFlow/Keras checkpoint, use `emg-import-effie` (or
+`apps/desktop/scripts/import_effie.py`) as a conversion helper. The fine-tuning
+path itself uses the PyTorch adapter in:
 
 ```text
-emg_live_marker/ml/effie_adapter.py
-emg_live_marker/ml/effie_preprocess.py
+apps/desktop/src/emg_live_marker/ml/effie_adapter.py
+apps/desktop/src/emg_live_marker/ml/effie_preprocess.py
 ```
 
 Fine-tune a classifier:
@@ -24,8 +25,8 @@ Fine-tune a classifier:
 ```powershell
 python scripts\finetune_effie_gesture.py ^
   --dataset-root dataset ^
-  --effie-root external_models\EffiE ^
-  --checkpoint-path external_models\EffiE\checkpoints\<checkpoint_file> ^
+  --effie-root ..\..\third_party\EffiE ^
+  --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
   --output-dir models\effie_finetuned ^
   --mode freeze_backbone ^
   --epochs 50 ^
@@ -43,8 +44,8 @@ If freezing the backbone is not enough:
 ```powershell
 python scripts\finetune_effie_gesture.py ^
   --dataset-root dataset ^
-  --effie-root external_models\EffiE ^
-  --checkpoint-path external_models\EffiE\checkpoints\<checkpoint_file> ^
+  --effie-root ..\..\third_party\EffiE ^
+  --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
   --output-dir models\effie_finetuned_all ^
   --mode finetune_all ^
   --epochs 50 ^
@@ -56,4 +57,3 @@ python scripts\finetune_effie_gesture.py ^
   --balanced-sampler ^
   --export-torchscript
 ```
-

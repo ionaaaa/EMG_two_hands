@@ -78,7 +78,7 @@ def load_effie_checkpoint(
     """Load a PyTorch EffiE-style checkpoint if available.
 
     TensorFlow/Keras checkpoint conversion is intentionally handled by
-    ``external_models/effie/import_effie.py`` so the main app does not depend on
+    ``emg_live_marker.cli.import_effie`` so the main app does not depend on
     TensorFlow.
     """
 
@@ -175,4 +175,3 @@ def load_effie_finetuned_model(path: str | Path) -> EffieGesturePredictor:
         model_info=model_info,
         normalization_loaded=normalization_loaded,
     )
-

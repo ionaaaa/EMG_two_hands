@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
-
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from emg_live_marker.config import DEFAULT_BAUDRATE
 from emg_live_marker.ui.main_window import MainWindow

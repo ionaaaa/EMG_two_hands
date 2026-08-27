@@ -13,13 +13,9 @@ instructions instead of silently producing mismatched weights.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import torch
-
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from emg_live_marker.ml.effie_adapter import EffieGestureNet
 from emg_live_marker.ml.gesture_model import LABELS
@@ -46,7 +42,7 @@ def import_pytorch_checkpoint(checkpoint_path: Path, output_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Import EffiE checkpoint for local fine-tuning.")
-    parser.add_argument("--effie-root", default=Path("external_models") / "EffiE", type=Path)
+    parser.add_argument("--effie-root", required=True, type=Path)
     parser.add_argument("--checkpoint-path", required=True, type=Path)
     parser.add_argument("--output-path", default=Path("models") / "effie_imported_backbone.pt", type=Path)
     parser.add_argument("--format", choices=["auto", "pytorch", "tensorflow"], default="auto")
@@ -66,8 +62,8 @@ def main() -> int:
     message = (
         "TensorFlow/Keras EffiE checkpoint conversion is optional and depends on "
         "the exact upstream checkpoint/model version. Clone the repository with:\n"
-        "  git clone https://github.com/MIC-Laboratory/IEEE-NER-2023-EffiE external_models\\EffiE\n"
-        "Then inspect external_models\\EffiE\\checkpoints and convert the checkpoint "
+        "  git clone https://github.com/MIC-Laboratory/IEEE-NER-2023-EffiE third_party\\EffiE\n"
+        "Then inspect third_party\\EffiE\\checkpoints and convert the checkpoint "
         "to a PyTorch state_dict matching EffieGestureNet, or train without "
         "--checkpoint-path first."
     )
@@ -76,4 +72,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

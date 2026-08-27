@@ -20,9 +20,9 @@ from emg_live_marker.ml.gesture_model import (
 from emg_live_marker.ml.preprocess import prepare_emg_window, preprocess_emg_window
 from emg_live_marker.ml.realtime_decoder import RealtimeGestureDecoder
 from emg_live_marker.realtime.ring_buffer import EmgRingBuffer
-from scripts.inspect_gesture_dataset import inspect_dataset
-from scripts.finetune_effie_gesture import finetune_effie
-from scripts.train_gesture_classifier import build_dataset, train_model
+from emg_live_marker.cli.finetune_effie_gesture import finetune_effie
+from emg_live_marker.cli.inspect_gesture_dataset import inspect_dataset
+from emg_live_marker.cli.train_gesture_classifier import build_dataset, train_model
 
 
 def test_preprocess_emg_window_outputs_conv1d_tensor():

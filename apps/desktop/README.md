@@ -4,43 +4,55 @@
 
 It supports simulated data for development without hardware and real serial input through pyserial.
 
+## Layout
+
+```text
+src/emg_live_marker/  # installable package
+scripts/              # thin launch wrappers
+tests/                # automated tests
+```
+
 ## Install
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e ".[dev]"
+$python = "/Applications/anaconda3/envs/BN5213/bin/python"
+& $python -m pip install -e ".[dev]"
 ```
+
+The project standard is the `BN5213` Conda environment. Do not rely on the
+checked-in Windows-format `venv/`; create another environment only when that is
+explicitly intended. The editable installation is required before using the
+thin scripts or package CLI from outside this directory.
 
 ## Test
 
 ```powershell
-pytest
+& $python -m pytest
 ```
 
 ## Run
 
 ```powershell
-python -m emg_live_marker --simulate
-python -m emg_live_marker --port COM4
+& $python -m emg_live_marker --simulate
+& $python -m emg_live_marker --port COM4
 ```
 
 No hardware is required for the simulator:
 
 ```powershell
-python -m emg_live_marker --simulate
+& $python -m emg_live_marker --simulate
 ```
 
 Running without arguments also starts the simulator:
 
 ```powershell
-python -m emg_live_marker
+& $python -m emg_live_marker
 ```
 
 Real serial mode on Windows:
 
 ```powershell
-python -m emg_live_marker --port COM4 --baudrate 921600
+& $python -m emg_live_marker --port COM4 --baudrate 921600
 ```
 
 ## Calibration Game Model
@@ -50,7 +62,7 @@ changes between sessions. After wearing the bracelet, collect a small calibratio
 set for the three gestures, then train a same-day game model:
 
 ```powershell
-python scripts/train_gesture_classifier.py ^
+& $python scripts/train_gesture_classifier.py ^
   --dataset-root dataset ^
   --output-dir models/calibration_game_model ^
   --preset calibration ^
@@ -69,17 +81,17 @@ pose-regression models. For a public model closer to this hardware, use the
 Myo/8-channel/200Hz EffiE project:
 
 ```powershell
-git clone https://github.com/MIC-Laboratory/IEEE-NER-2023-EffiE external_models\EffiE
-dir external_models\EffiE\checkpoints
+git clone https://github.com/MIC-Laboratory/IEEE-NER-2023-EffiE ..\..\third_party\EffiE
+dir ..\..\third_party\EffiE\checkpoints
 ```
 
 Freeze the EffiE-style backbone and train a 4-class game head:
 
 ```powershell
-python scripts\finetune_effie_gesture.py ^
+& $python scripts\finetune_effie_gesture.py ^
   --dataset-root dataset ^
-  --effie-root external_models\EffiE ^
-  --checkpoint-path external_models\EffiE\checkpoints\<checkpoint_file> ^
+  --effie-root ..\..\third_party\EffiE ^
+  --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
   --output-dir models\effie_finetuned ^
   --mode freeze_backbone ^
   --epochs 50 ^
@@ -96,10 +108,10 @@ If freezing the backbone is not enough, fine-tune the whole model with a lower
 learning rate:
 
 ```powershell
-python scripts\finetune_effie_gesture.py ^
+& $python scripts\finetune_effie_gesture.py ^
   --dataset-root dataset ^
-  --effie-root external_models\EffiE ^
-  --checkpoint-path external_models\EffiE\checkpoints\<checkpoint_file> ^
+  --effie-root ..\..\third_party\EffiE ^
+  --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
   --output-dir models\effie_finetuned_all ^
   --mode finetune_all ^
   --epochs 50 ^

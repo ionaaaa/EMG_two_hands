@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 
 from emg_live_marker.ml.gesture_model import EMGGestureNet, LABELS
-from scripts.evaluate_realtime_smoothing import LOG_FIELDS, main
+from emg_live_marker.cli.evaluate_realtime_smoothing import LOG_FIELDS, main
 
 
 def _write_csv(path: Path, header: list[str], rows: list[list[object]]) -> None:
