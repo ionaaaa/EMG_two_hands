@@ -38,6 +38,13 @@ dist/
 /data/recordings/
 *.bin
 
+# Generated models, reports, and runtime logs; keep only artifact documentation and manifests.
+/artifacts/models/
+/artifacts/reports/
+/artifacts/logs/
+/artifacts/duplicate-review/
+/artifacts/legacy-unclassified/
+
 # Generated ML models and experiment outputs
 /apps/desktop/models/
 /apps/desktop/reports/

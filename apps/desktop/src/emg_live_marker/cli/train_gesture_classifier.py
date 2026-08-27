@@ -26,6 +26,7 @@ from emg_live_marker.paths import (
     resolve_project_paths,
 )
 from emg_live_marker.realtime.stream_processor import StreamingEMGProcessor
+from emg_live_marker.run_naming import build_run_id
 
 EMG_FS = 250.0
 CHANNELS = 8
@@ -693,6 +694,7 @@ def train_model(
     save_best: bool = True,
     verbose_device: bool = True,
     training_preset: str | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     random.seed(seed)
     np.random.seed(seed)
@@ -831,6 +833,7 @@ def train_model(
 
     chosen_metrics = final_val_metrics or final_train_metrics
     report = {
+        "run_id": run_id or output_dir.name,
         "best_epoch": int(best_epoch),
         "best_val_accuracy": float(best_score) if final_val_metrics is not None else None,
         "final_train_accuracy": float(final_train_metrics["accuracy"]),
@@ -949,6 +952,8 @@ def run_cross_session_cv(
         ]
         per_class_avg[label] = float(np.mean(values)) if values else 0.0
     report = {
+        "run_id": kwargs.get("run_id") or output_dir.name,
+        "seed": kwargs.get("seed"),
         "folds": folds,
         "mean_val_accuracy": float(np.mean(accuracies)) if accuracies else None,
         "mean_per_class_accuracy": per_class_avg,
@@ -961,6 +966,7 @@ def run_cross_session_cv(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train EMG gesture classifier.")
     parser.add_argument("--output-dir", default=None, type=Path)
+    parser.add_argument("--run-id", help="override the generated name when --output-dir is omitted")
     add_path_arguments(parser)
     parser.add_argument("--preset", choices=["calibration"])
     parser.add_argument("--model", choices=[MODEL_CNN, MODEL_TCN], default=MODEL_TCN)
@@ -1004,14 +1010,19 @@ def main() -> int:
         args.export_torchscript = True
         args.window_s = 1.0
         args.stride_s = 0.1
+    split = "cross-session-cv" if args.cross_session_cv else f"{args.val_split}-split"
+    mode = args.preset or "standard"
     if args.output_dir is None:
-        args.output_dir = (
-            paths.models_root / "calibration_game_model"
-            if args.preset == "calibration"
-            else paths.models_root / "emg2pose_gesture_v1"
+        run_id = args.run_id or build_run_id(
+            model=args.model,
+            split=split,
+            mode=mode,
+            seed=args.seed,
         )
+        args.output_dir = paths.models_root / run_id
     else:
         args.output_dir = resolve_project_path(args.output_dir, paths)
+        run_id = args.run_id or args.output_dir.name
     dataset_root = resolve_dataset_root(args.dataset_root, paths)
     common_args = {
         "model_name": args.model,
@@ -1035,11 +1046,10 @@ def main() -> int:
         "balanced_loss": args.balanced_loss,
         "save_best": args.save_best,
         "training_preset": args.preset,
+        "run_id": run_id,
     }
     if args.cross_session_cv:
         cv_dir = args.output_dir
-        if cv_dir.name == "emg2pose_gesture_v1":
-            cv_dir = cv_dir.parent / "emg2pose_gesture_cv"
         common_args["train_all"] = False
         report = run_cross_session_cv(dataset_root, cv_dir, **common_args)
         print(json.dumps(report, ensure_ascii=False, indent=2))

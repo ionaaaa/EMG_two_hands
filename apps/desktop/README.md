@@ -74,7 +74,6 @@ set for the three gestures, then train a same-day game model:
 ```powershell
 & $python scripts/train_gesture_classifier.py ^
   --dataset-root data/datasets ^
-  --output-dir apps/desktop/models/calibration_game_model ^
   --preset calibration ^
   --device auto
 ```
@@ -102,7 +101,6 @@ Freeze the EffiE-style backbone and train a 4-class game head:
   --dataset-root data/datasets ^
   --effie-root ..\..\third_party\EffiE ^
   --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
-  --output-dir apps/desktop/models\effie_finetuned ^
   --mode freeze_backbone ^
   --epochs 50 ^
   --batch-size 128 ^
@@ -122,7 +120,6 @@ learning rate:
   --dataset-root data/datasets ^
   --effie-root ..\..\third_party\EffiE ^
   --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
-  --output-dir apps/desktop/models\effie_finetuned_all ^
   --mode finetune_all ^
   --epochs 50 ^
   --batch-size 128 ^
@@ -137,6 +134,11 @@ learning rate:
 The exported `gesture_classifier.ts` uses EffiE-style preprocessing: raw 250Hz
 EMG is resampled to 200Hz, the latest 32 samples are used as an `8x32` window,
 and the model outputs `rest / fist / open-palm / pinch`.
+
+When `--output-dir` is omitted, both training commands automatically create a
+directory named `{model}__{split}__{mode}__{timestamp}__seed-{seed}`. Pass
+`--artifacts-root artifacts` to write new runs under the repository-level
+artifact layout.
 
 By default, recordings are written under:
 

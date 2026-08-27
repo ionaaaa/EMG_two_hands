@@ -101,10 +101,9 @@ python apps/web-game/send_demo_gesture.py fist 0.93 --hand left
 ```bash
 cd apps/desktop
 
-# 常规训练；输出目录请使用新的、语义明确的实验名
+# 常规训练；不传 --output-dir 会自动生成含 model/split/mode/timestamp/seed 的 run ID
 $PYTHON scripts/train_gesture_classifier.py \
   --dataset-root data/datasets \
-  --output-dir apps/desktop/models/<run_id> \
   --device auto
 
 # EffiE 微调；需要自行提供外部 EffiE 工程和 checkpoint
@@ -112,7 +111,6 @@ $PYTHON scripts/finetune_effie_gesture.py \
   --dataset-root data/datasets \
   --effie-root ../../third_party/EffiE \
   --checkpoint-path ../../third_party/EffiE/checkpoints/<checkpoint_file> \
-  --output-dir apps/desktop/models/<run_id> \
   --device auto
 
 # 回放评估实时平滑效果
@@ -142,6 +140,8 @@ $PYTHON scripts/evaluate_realtime_smoothing.py \
 ```
 
 对应的环境变量是 `EMG_DATASET_ROOT`、`EMG_RECORDINGS_ROOT`、`EMG_ARTIFACTS_ROOT`；用 `EMG_PATHS_CONFIG` 或 `--paths-config` 可选择其他 JSON 配置文件。模型与报告分别位于 `artifacts_root/models` 和 `artifacts_root/reports`。
+
+新训练默认使用 `{model}__{split}__{mode}__{timestamp}__seed-{seed}` 作为输出目录名。当历史产物审核完成后，可用 `--artifacts-root artifacts` 将新产物直接写入根目录 `artifacts/`。
 
 ## 验证基线
 

@@ -49,6 +49,7 @@ from emg_live_marker.cli.train_gesture_classifier import (
     resolve_dataset_root,
 )
 from emg_live_marker.paths import add_path_arguments, resolve_paths_from_args, resolve_project_path
+from emg_live_marker.run_naming import build_run_id
 
 
 @dataclass(frozen=True)
@@ -255,6 +256,7 @@ def finetune_effie(
     balanced_sampler: bool = True,
     export_torchscript: bool = True,
     seed: int = 42,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     random.seed(seed)
     np.random.seed(seed)
@@ -345,6 +347,7 @@ def finetune_effie(
     }
     (output_dir / "model_info.json").write_text(json.dumps(model_info, ensure_ascii=False, indent=2), encoding="utf-8")
     report = {
+        "run_id": run_id or output_dir.name,
         "model_type": MODEL_TYPE,
         "mode": mode,
         "checkpoint": checkpoint_info,
@@ -360,6 +363,7 @@ def finetune_effie(
         "samples_after_balance": len(records),
         "holdout_session": holdout,
         "val_split": val_split,
+        "seed": seed,
         **device_info,
     }
     (output_dir / "train_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -390,7 +394,12 @@ def run_cross_session_cv(dataset_root: Path, output_dir: Path, **kwargs: Any) ->
             }
         )
     values = [float(fold["val_accuracy"]) for fold in folds if fold["val_accuracy"] is not None]
-    report = {"folds": folds, "mean_val_accuracy": float(np.mean(values)) if values else None}
+    report = {
+        "run_id": kwargs.get("run_id") or output_dir.name,
+        "seed": kwargs.get("seed"),
+        "folds": folds,
+        "mean_val_accuracy": float(np.mean(values)) if values else None,
+    }
     (output_dir / "cv_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
 
@@ -400,6 +409,7 @@ def main() -> int:
     parser.add_argument("--effie-root", required=True, type=Path)
     parser.add_argument("--checkpoint-path", type=Path)
     parser.add_argument("--output-dir", default=None, type=Path)
+    parser.add_argument("--run-id", help="override the generated name when --output-dir is omitted")
     add_path_arguments(parser)
     parser.add_argument("--mode", choices=["freeze_backbone", "finetune_all"], default="freeze_backbone")
     parser.add_argument("--epochs", default=50, type=int)
@@ -414,16 +424,25 @@ def main() -> int:
     parser.add_argument("--no-balanced-sampler", dest="balanced_sampler", action="store_false")
     parser.add_argument("--export-torchscript", action="store_true", default=True)
     parser.add_argument("--no-export-torchscript", dest="export_torchscript", action="store_false")
+    parser.add_argument("--seed", default=42, type=int)
     args = parser.parse_args()
     paths = resolve_paths_from_args(args)
     dataset_root = resolve_dataset_root(args.dataset_root, paths)
     args.effie_root = resolve_project_path(args.effie_root, paths)
     if args.checkpoint_path is not None:
         args.checkpoint_path = resolve_project_path(args.checkpoint_path, paths)
+    split = "cross-session-cv" if args.cross_session_cv else f"{args.val_split}-split"
     if args.output_dir is None:
-        args.output_dir = paths.models_root / "effie_finetuned"
+        run_id = args.run_id or build_run_id(
+            model="effie",
+            split=split,
+            mode=args.mode,
+            seed=args.seed,
+        )
+        args.output_dir = paths.models_root / run_id
     else:
         args.output_dir = resolve_project_path(args.output_dir, paths)
+        run_id = args.run_id or args.output_dir.name
     common = {
         "checkpoint_path": args.checkpoint_path,
         "mode": args.mode,
@@ -434,6 +453,8 @@ def main() -> int:
         "max_rest_ratio": args.max_rest_ratio,
         "balanced_sampler": args.balanced_sampler,
         "export_torchscript": args.export_torchscript,
+        "seed": args.seed,
+        "run_id": run_id,
     }
     if args.cross_session_cv:
         report = run_cross_session_cv(dataset_root, args.output_dir, **common)
