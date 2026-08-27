@@ -22,6 +22,7 @@ from emg_live_marker.cli.train_gesture_classifier import (
     read_csv_dicts,
     resolve_dataset_root,
 )
+from emg_live_marker.paths import add_path_arguments, resolve_paths_from_args, resolve_project_path
 
 EMG_FS = 250.0
 ACTION_LABELS = tuple(label for label in LABELS if label != "rest")
@@ -524,9 +525,9 @@ def evaluate_realtime_smoothing(args: argparse.Namespace) -> dict[str, Any]:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Offline replay evaluation for realtime EMG smoothing.")
-    parser.add_argument("--dataset-root", required=True, type=Path)
-    parser.add_argument("--model-path", required=True, type=Path)
-    parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--model-path", type=Path)
+    parser.add_argument("--output-dir", type=Path)
+    add_path_arguments(parser)
     parser.add_argument("--session")
     parser.add_argument("--window-s", default=1.0, type=float)
     parser.add_argument("--stride-s", default=0.1, type=float)
@@ -542,6 +543,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    paths = resolve_paths_from_args(args)
+    args.dataset_root = resolve_dataset_root(args.dataset_root, paths)
+    if args.model_path is None:
+        args.model_path = paths.models_root / "effie_real_full_v2_continue" / "gesture_classifier.ts"
+    else:
+        args.model_path = resolve_project_path(args.model_path, paths)
+    if args.output_dir is None:
+        args.output_dir = paths.reports_root / "realtime_smoothing"
+    else:
+        args.output_dir = resolve_project_path(args.output_dir, paths)
     summary = evaluate_realtime_smoothing(args)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0

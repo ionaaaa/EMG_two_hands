@@ -55,6 +55,17 @@ Real serial mode on Windows:
 & $python -m emg_live_marker --port COM4 --baudrate 921600
 ```
 
+## Paths
+
+All project paths are resolved from the repository root, not from the current
+working directory. Until the data migration, defaults preserve the existing
+locations: `apps/desktop/emg_live_marker/dataset`, `apps/desktop/recordings`,
+and `apps/desktop` for artifacts. Use `--dataset-root`, `--recordings-root`,
+and `--artifacts-root` to override them. A local repository-root
+`.emg-paths.json` can provide the same three keys and is ignored by Git; its
+values override environment variables (`EMG_DATASET_ROOT`, `EMG_RECORDINGS_ROOT`,
+`EMG_ARTIFACTS_ROOT`) but are overridden by command-line options.
+
 ## Calibration Game Model
 
 For live game demos, cross-session accuracy can be low because bracelet placement
@@ -63,15 +74,15 @@ set for the three gestures, then train a same-day game model:
 
 ```powershell
 & $python scripts/train_gesture_classifier.py ^
-  --dataset-root dataset ^
-  --output-dir models/calibration_game_model ^
+  --dataset-root apps/desktop/emg_live_marker/dataset ^
+  --output-dir apps/desktop/models/calibration_game_model ^
   --preset calibration ^
   --device auto
 ```
 
 The calibration preset trains the `emg2pose_tcn` classifier with balanced rest
 windows, balanced sampling/loss, best-checkpoint saving, and TorchScript export.
-The Game Decoder will prefer `models/calibration_game_model/gesture_classifier.ts`
+The Game Decoder will prefer `apps/desktop/models/calibration_game_model/gesture_classifier.ts`
 when it exists.
 
 ## EffiE Transfer Learning
@@ -89,10 +100,10 @@ Freeze the EffiE-style backbone and train a 4-class game head:
 
 ```powershell
 & $python scripts\finetune_effie_gesture.py ^
-  --dataset-root dataset ^
+  --dataset-root apps/desktop/emg_live_marker/dataset ^
   --effie-root ..\..\third_party\EffiE ^
   --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
-  --output-dir models\effie_finetuned ^
+  --output-dir apps/desktop/models\effie_finetuned ^
   --mode freeze_backbone ^
   --epochs 50 ^
   --batch-size 128 ^
@@ -109,10 +120,10 @@ learning rate:
 
 ```powershell
 & $python scripts\finetune_effie_gesture.py ^
-  --dataset-root dataset ^
+  --dataset-root apps/desktop/emg_live_marker/dataset ^
   --effie-root ..\..\third_party\EffiE ^
   --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
-  --output-dir models\effie_finetuned_all ^
+  --output-dir apps/desktop/models\effie_finetuned_all ^
   --mode finetune_all ^
   --epochs 50 ^
   --batch-size 128 ^
@@ -128,10 +139,10 @@ The exported `gesture_classifier.ts` uses EffiE-style preprocessing: raw 250Hz
 EMG is resampled to 200Hz, the latest 32 samples are used as an `8x32` window,
 and the model outputs `rest / fist / open-palm / pinch`.
 
-Recordings are written under:
+By default, recordings are written under:
 
 ```text
-recordings\YYYY-MM-DD_HH-MM-SS\
+apps/desktop/recordings\YYYY-MM-DD_HH-MM-SS\
 ```
 
 Each session contains `metadata.json`, `emg.csv`, `imu.csv`, `events.csv`, and `raw_packets.bin`.

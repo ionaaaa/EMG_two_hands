@@ -44,6 +44,7 @@ from emg_live_marker.ml.dual_game_mapper import BraceletSide, DualGameMapper, No
 from emg_live_marker.ml.game_bridge import GameBridge
 from emg_live_marker.ml.gesture_model import load_model
 from emg_live_marker.ml.realtime_decoder import RealtimeGestureDecoder
+from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 from emg_live_marker.realtime.collection import (
     COLLECTION_GESTURES,
     GESTURE_DISPLAY_NAMES,
@@ -65,21 +66,25 @@ NOTCH_OPTIONS: dict[str, tuple[float, ...]] = {
     "60Hz": (60.0,),
     "60+120Hz": (60.0, 120.0),
 }
-DEFAULT_EFFIE_GAME_MODEL_PATH = Path("models") / "effie_real_full_v2_continue" / "gesture_classifier.ts"
-CALIBRATION_MODEL_PATH = Path("models") / "calibration_game_model" / "gesture_classifier.ts"
-FALLBACK_GAME_MODEL_PATH = Path("models") / "gesture_classifier.pt"
+DEFAULT_EFFIE_GAME_MODEL_RELATIVE_PATH = Path("effie_real_full_v2_continue") / "gesture_classifier.ts"
+CALIBRATION_MODEL_RELATIVE_PATH = Path("calibration_game_model") / "gesture_classifier.ts"
+FALLBACK_GAME_MODEL_RELATIVE_PATH = Path("gesture_classifier.pt")
 CROSS_SESSION_WARNING = (
     "Cross-session accuracy may be low. For best game demo, train a calibration model after wearing the bracelet.\n"
     "跨 session 准确率可能较低。演示前建议重新采集校准数据并训练当天模型。"
 )
 
 
-def default_game_model_path() -> Path:
-    if DEFAULT_EFFIE_GAME_MODEL_PATH.exists():
-        return DEFAULT_EFFIE_GAME_MODEL_PATH
-    if CALIBRATION_MODEL_PATH.exists():
-        return CALIBRATION_MODEL_PATH
-    return FALLBACK_GAME_MODEL_PATH
+def default_game_model_path(paths: ProjectPaths | None = None) -> Path:
+    model_root = (paths or resolve_project_paths()).models_root
+    default_effie = model_root / DEFAULT_EFFIE_GAME_MODEL_RELATIVE_PATH
+    calibration = model_root / CALIBRATION_MODEL_RELATIVE_PATH
+    fallback = model_root / FALLBACK_GAME_MODEL_RELATIVE_PATH
+    if default_effie.exists():
+        return default_effie
+    if calibration.exists():
+        return calibration
+    return fallback
 
 
 @dataclass
@@ -116,6 +121,7 @@ class MainWindow(QMainWindow):
         simulate: bool = True,
         port: str | None = None,
         baudrate: int = DEFAULT_BAUDRATE,
+        paths: ProjectPaths | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -124,6 +130,7 @@ class MainWindow(QMainWindow):
 
         self._initial_port = port
         self._baudrate = int(baudrate)
+        self._paths = paths or resolve_project_paths()
         self._recorder = SessionRecorder()
         self._last_recording_dir: Path | None = None
         self._runtimes: dict[BraceletSide, BraceletRuntime] = {
@@ -520,7 +527,7 @@ class MainWindow(QMainWindow):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(4)
-        self._game_model_path_edit = QLineEdit(str(default_game_model_path()))
+        self._game_model_path_edit = QLineEdit(str(default_game_model_path(self._paths)))
         path_row = QWidget()
         path_layout = QHBoxLayout(path_row)
         path_layout.setContentsMargins(0, 0, 0, 0)
@@ -1205,7 +1212,7 @@ class MainWindow(QMainWindow):
         path, _filter = QFileDialog.getOpenFileName(
             self,
             "Select gesture model",
-            str(Path("models").resolve()),
+            str(self._paths.models_root),
             "Gesture model (*.ts *.pt *.pth);;All files (*)",
         )
         if path:
@@ -1396,7 +1403,10 @@ class MainWindow(QMainWindow):
         if self._recorder.is_recording:
             return
         try:
-            session_dir = self._recorder.start(baudrate=self._baudrate)
+            session_dir = self._recorder.start(
+                root_dir=self._paths.recordings_root,
+                baudrate=self._baudrate,
+            )
         except Exception as exc:
             self.statusBar().showMessage(f"Recording start failed: {exc}", 6000)
             return
@@ -1448,7 +1458,7 @@ class MainWindow(QMainWindow):
         if abs(self._collection_trial_duration_s - self._trial_duration_spin.value()) > 0.001:
             self._trial_duration_spin.setValue(self._collection_trial_duration_s)
 
-        session_dir = Path("dataset") / subject_id / session_id
+        session_dir = self._paths.dataset_root / subject_id / session_id
         if session_dir.exists():
             QMessageBox.warning(
                 self,
@@ -1775,7 +1785,7 @@ class MainWindow(QMainWindow):
         return f"{max_id + 1:04d}"
 
     def _next_session_id(self, subject_id: str) -> str:
-        subject_dir = Path("dataset") / subject_id
+        subject_dir = self._paths.dataset_root / subject_id
         max_id = 0
         if subject_dir.exists():
             for path in subject_dir.iterdir():
@@ -1802,7 +1812,7 @@ class MainWindow(QMainWindow):
         return not any(char in invalid_chars for char in value)
 
     def _open_recording_folder(self) -> None:
-        path = self._last_recording_dir or Path("recordings")
+        path = self._last_recording_dir or self._paths.recordings_root
         path.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve())))
 

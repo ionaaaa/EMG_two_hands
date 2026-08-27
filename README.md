@@ -89,8 +89,8 @@ python apps/web-game/send_demo_gesture.py fist 0.93 --hand left
 
 当前没有独立的录制命令行脚本。启动桌面端后，在窗口中使用：
 
-- **Start Recording**：写入 `recordings/YYYY-MM-DD_HH-MM-SS/`；
-- **Start Collection**：写入 `dataset/<subject_id>/<session_id>/`，用于训练。
+- **Start Recording**：写入录制根目录下的 `YYYY-MM-DD_HH-MM-SS/`；
+- **Start Collection**：写入数据集根目录下的 `<subject_id>/<session_id>/`，用于训练。
 
 每个会话包含 `metadata.json`、`emg.csv`、`imu.csv`、`events.csv` 与 `raw_packets.bin`。这些都是本地数据产物，当前不应提交到 Git。
 
@@ -103,27 +103,45 @@ cd apps/desktop
 
 # 常规训练；输出目录请使用新的、语义明确的实验名
 $PYTHON scripts/train_gesture_classifier.py \
-  --dataset-root emg_live_marker/dataset \
-  --output-dir models/<run_id> \
+  --dataset-root apps/desktop/emg_live_marker/dataset \
+  --output-dir apps/desktop/models/<run_id> \
   --device auto
 
 # EffiE 微调；需要自行提供外部 EffiE 工程和 checkpoint
 $PYTHON scripts/finetune_effie_gesture.py \
-  --dataset-root emg_live_marker/dataset \
+  --dataset-root apps/desktop/emg_live_marker/dataset \
   --effie-root ../../third_party/EffiE \
   --checkpoint-path ../../third_party/EffiE/checkpoints/<checkpoint_file> \
-  --output-dir models/<run_id> \
+  --output-dir apps/desktop/models/<run_id> \
   --device auto
 
 # 回放评估实时平滑效果
 $PYTHON scripts/evaluate_realtime_smoothing.py \
-  --dataset-root emg_live_marker/dataset \
-  --model-path models/<run_id>/gesture_classifier.ts \
-  --output-dir reports/<run_id> \
+  --dataset-root apps/desktop/emg_live_marker/dataset \
+  --model-path apps/desktop/models/<run_id>/gesture_classifier.ts \
+  --output-dir apps/desktop/reports/<run_id> \
   --session session_001
 ```
 
-训练脚本在没有顶层 `dataset/` 时会兼容当前包内的 `emg_live_marker/dataset/`。这是迁移期间的临时兼容逻辑；路径整理完成后应统一使用新的数据根目录。
+## 数据与产物路径
+
+路径不依赖执行命令时的当前目录。在实际搬迁前，默认仍指向旧位置：
+
+- dataset：`apps/desktop/emg_live_marker/dataset`
+- recordings：`apps/desktop/recordings`
+- artifacts：`apps/desktop` （其中 `models/` 与 `reports/` 为模型和报告目录）
+
+优先级从高到低是：命令行 `--dataset-root` / `--recordings-root` / `--artifacts-root`、路径配置文件、环境变量、上述默认值。本机可在仓库根目录创建未跟踪的 `.emg-paths.json`：
+
+```json
+{
+  "dataset_root": "data/datasets",
+  "recordings_root": "data/recordings",
+  "artifacts_root": "artifacts"
+}
+```
+
+对应的环境变量是 `EMG_DATASET_ROOT`、`EMG_RECORDINGS_ROOT`、`EMG_ARTIFACTS_ROOT`；用 `EMG_PATHS_CONFIG` 或 `--paths-config` 可选择其他 JSON 配置文件。模型与报告分别位于 `artifacts_root/models` 和 `artifacts_root/reports`。
 
 ## 验证基线
 

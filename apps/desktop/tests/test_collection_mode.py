@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from emg_live_marker.device.protocol import EmgPacket, ImuPacket
 from emg_live_marker.realtime.collection import GESTURE_DISPLAY_NAMES, build_trial_list
 from emg_live_marker.realtime.recorder import SessionRecorder
+from emg_live_marker.paths import ProjectPaths
 from emg_live_marker.ui.main_window import MainWindow
 
 
@@ -252,9 +253,14 @@ def test_non_collection_recording_keeps_packet_t_for_saved_time(tmp_path):
 
 
 def test_start_collection_generates_trial_list_and_dataset_session(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     _app()
-    window = MainWindow(simulate=False)
+    paths = ProjectPaths(
+        project_root=tmp_path,
+        dataset_root=tmp_path / "dataset",
+        recordings_root=tmp_path / "recordings",
+        artifacts_root=tmp_path / "artifacts",
+    )
+    window = MainWindow(simulate=False, paths=paths)
     monkeypatch.setattr(window, "_collection_preflight_ok", lambda: True)
 
     window._subject_id_edit.setText("subject_01")
@@ -283,9 +289,14 @@ def test_start_collection_generates_trial_list_and_dataset_session(tmp_path, mon
 
 
 def test_collection_trial_flow_writes_four_phase_events(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     _app()
-    window = MainWindow(simulate=False)
+    paths = ProjectPaths(
+        project_root=tmp_path,
+        dataset_root=tmp_path / "dataset",
+        recordings_root=tmp_path / "recordings",
+        artifacts_root=tmp_path / "artifacts",
+    )
+    window = MainWindow(simulate=False, paths=paths)
     monkeypatch.setattr(window, "_collection_preflight_ok", lambda: True)
     window._raw_emg_buffer.append_many(
         np.array([0.0]),
@@ -325,9 +336,14 @@ def test_collection_trial_flow_writes_four_phase_events(tmp_path, monkeypatch):
 
 
 def test_collection_phase_timing_uses_ui_durations_and_updates_trial_duration(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     _app()
-    window = MainWindow(simulate=False)
+    paths = ProjectPaths(
+        project_root=tmp_path,
+        dataset_root=tmp_path / "dataset",
+        recordings_root=tmp_path / "recordings",
+        artifacts_root=tmp_path / "artifacts",
+    )
+    window = MainWindow(simulate=False, paths=paths)
     monkeypatch.setattr(window, "_collection_preflight_ok", lambda: True)
     scheduled: list[tuple[int, str]] = []
 
@@ -361,9 +377,14 @@ def test_collection_phase_timing_uses_ui_durations_and_updates_trial_duration(tm
 
 
 def test_collection_pause_resume_preserves_current_phase_remaining_time(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     _app()
-    window = MainWindow(simulate=False)
+    paths = ProjectPaths(
+        project_root=tmp_path,
+        dataset_root=tmp_path / "dataset",
+        recordings_root=tmp_path / "recordings",
+        artifacts_root=tmp_path / "artifacts",
+    )
+    window = MainWindow(simulate=False, paths=paths)
     monkeypatch.setattr(window, "_collection_preflight_ok", lambda: True)
     window._subject_id_edit.setText("subject_01")
     window._session_id_edit.setText("session_001")

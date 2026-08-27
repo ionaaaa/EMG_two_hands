@@ -8,6 +8,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication, QGroupBox, QToolBar, QWidget
 
 from emg_live_marker.device.protocol import EmgPacket
+from emg_live_marker.paths import ProjectPaths
 from emg_live_marker.ui import main_window as main_window_module
 from emg_live_marker.ui.main_window import MainWindow
 from emg_live_marker.ui.style import APP_QSS
@@ -128,11 +129,13 @@ def test_game_decoder_prefers_effie_dual_model_path(monkeypatch, tmp_path):
     calibration_model.parent.mkdir(parents=True)
     calibration_model.write_bytes(b"dummy")
     fallback_model = tmp_path / "models" / "gesture_classifier.pt"
-    monkeypatch.setattr(main_window_module, "DEFAULT_EFFIE_GAME_MODEL_PATH", effie_model)
-    monkeypatch.setattr(main_window_module, "CALIBRATION_MODEL_PATH", calibration_model)
-    monkeypatch.setattr(main_window_module, "FALLBACK_GAME_MODEL_PATH", fallback_model)
-
-    window = MainWindow(simulate=False)
+    paths = ProjectPaths(
+        project_root=tmp_path,
+        dataset_root=tmp_path / "dataset",
+        recordings_root=tmp_path / "recordings",
+        artifacts_root=tmp_path,
+    )
+    window = MainWindow(simulate=False, paths=paths)
 
     assert window._game_model_path_edit.text() == str(effie_model)
     window.close()
@@ -286,9 +289,14 @@ def test_game_decoder_send_test_buttons_use_game_bridge(monkeypatch):
 
 
 def test_start_collection_disables_game_control(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     _app()
-    window = MainWindow(simulate=False)
+    paths = ProjectPaths(
+        project_root=tmp_path,
+        dataset_root=tmp_path / "dataset",
+        recordings_root=tmp_path / "recordings",
+        artifacts_root=tmp_path / "artifacts",
+    )
+    window = MainWindow(simulate=False, paths=paths)
     monkeypatch.setattr(window, "_collection_preflight_ok", lambda: True)
     window._subject_id_edit.setText("subject_01")
     window._session_id_edit.setText("session_001")
@@ -322,9 +330,14 @@ def test_waveform_timer_runs_at_20fps_without_frequency_panel():
 
 
 def test_collection_start_keeps_waveform_available_without_spectrum(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
     _app()
-    window = MainWindow(simulate=False)
+    paths = ProjectPaths(
+        project_root=tmp_path,
+        dataset_root=tmp_path / "dataset",
+        recordings_root=tmp_path / "recordings",
+        artifacts_root=tmp_path / "artifacts",
+    )
+    window = MainWindow(simulate=False, paths=paths)
     monkeypatch.setattr(window, "_collection_preflight_ok", lambda: True)
     window._subject_id_edit.setText("subject_01")
     window._session_id_edit.setText("session_001")

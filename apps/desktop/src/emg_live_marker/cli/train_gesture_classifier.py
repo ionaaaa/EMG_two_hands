@@ -18,6 +18,13 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from emg_live_marker.ml.gesture_model import LABELS, MODEL_CNN, MODEL_TCN, create_model
+from emg_live_marker.paths import (
+    ProjectPaths,
+    add_path_arguments,
+    resolve_paths_from_args,
+    resolve_project_path,
+    resolve_project_paths,
+)
 from emg_live_marker.realtime.stream_processor import StreamingEMGProcessor
 
 EMG_FS = 250.0
@@ -53,13 +60,13 @@ def discover_session_dirs(dataset_root: Path) -> list[Path]:
     )
 
 
-def resolve_dataset_root(dataset_root: Path) -> Path:
-    if dataset_root.exists():
-        return dataset_root
-    package_dataset = Path(__file__).resolve().parents[3] / "emg_live_marker" / "dataset"
-    if dataset_root == Path("dataset") and package_dataset.exists():
-        return package_dataset
-    return dataset_root
+def resolve_dataset_root(dataset_root: Path | None, paths: ProjectPaths | None = None) -> Path:
+    """Keep the legacy helper while resolving omitted roots centrally."""
+
+    if dataset_root is not None:
+        resolved_paths = paths or resolve_project_paths()
+        return resolve_project_path(dataset_root, resolved_paths)
+    return (paths or resolve_project_paths()).dataset_root
 
 
 def load_emg(path: Path, *, signal_type: str = "raw") -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -953,8 +960,8 @@ def run_cross_session_cv(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train EMG gesture classifier.")
-    parser.add_argument("--dataset-root", default="dataset", type=Path)
     parser.add_argument("--output-dir", default=None, type=Path)
+    add_path_arguments(parser)
     parser.add_argument("--preset", choices=["calibration"])
     parser.add_argument("--model", choices=[MODEL_CNN, MODEL_TCN], default=MODEL_TCN)
     parser.add_argument("--signal", choices=["raw", "filtered"], default="raw")
@@ -984,6 +991,7 @@ def main() -> int:
     parser.add_argument("--save-best", action="store_true", default=True)
     parser.add_argument("--no-save-best", dest="save_best", action="store_false")
     args = parser.parse_args()
+    paths = resolve_paths_from_args(args)
     if args.preset == "calibration":
         args.model = MODEL_TCN
         args.train_all = True
@@ -998,11 +1006,13 @@ def main() -> int:
         args.stride_s = 0.1
     if args.output_dir is None:
         args.output_dir = (
-            Path("models") / "calibration_game_model"
+            paths.models_root / "calibration_game_model"
             if args.preset == "calibration"
-            else Path("models") / "emg2pose_gesture_v1"
+            else paths.models_root / "emg2pose_gesture_v1"
         )
-    dataset_root = resolve_dataset_root(args.dataset_root)
+    else:
+        args.output_dir = resolve_project_path(args.output_dir, paths)
+    dataset_root = resolve_dataset_root(args.dataset_root, paths)
     common_args = {
         "model_name": args.model,
         "signal_type": args.signal,

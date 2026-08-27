@@ -10,14 +10,7 @@ import argparse
 import json
 from pathlib import Path
 
-CANDIDATE_MODELS = {
-    "feature_rf": Path("models") / "feature_rf",
-    "emg2pose_tcn": Path("models") / "emg2pose_gesture_v1",
-    "tma_cnn": Path("models") / "tma_cnn",
-    "tts_cnn": Path("models") / "tts_cnn",
-    "effie_finetuned": Path("models") / "effie_finetuned",
-}
-
+from emg_live_marker.paths import add_path_arguments, resolve_paths_from_args, resolve_project_path
 
 def inspect_candidate(name: str, path: Path) -> dict[str, object]:
     model_info = path / "model_info.json"
@@ -38,11 +31,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Compare gesture model candidates.")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--json", action="store_true")
+    add_path_arguments(parser)
     args = parser.parse_args()
+    paths = resolve_paths_from_args(args)
+    candidate_models = {
+        "feature_rf": paths.models_root / "feature_rf",
+        "emg2pose_tcn": paths.models_root / "emg2pose_gesture_v1",
+        "tma_cnn": paths.models_root / "tma_cnn",
+        "tts_cnn": paths.models_root / "tts_cnn",
+        "effie_finetuned": paths.models_root / "effie_finetuned",
+    }
+    if args.output is not None:
+        args.output = resolve_project_path(args.output, paths)
     report = {
         "candidates": [
             inspect_candidate(name, path)
-            for name, path in CANDIDATE_MODELS.items()
+            for name, path in candidate_models.items()
         ],
         "comparison_modes": ["trial split", "cross-session-cv"],
     }

@@ -20,6 +20,7 @@ from emg_live_marker.cli.train_gesture_classifier import (
     read_csv_dicts,
     resolve_dataset_root,
 )
+from emg_live_marker.paths import add_path_arguments, resolve_paths_from_args
 
 
 def _load_emg_summary(path: Path) -> dict[str, Any]:
@@ -199,10 +200,11 @@ def print_report(report: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Inspect collected EMG gesture dataset.")
-    parser.add_argument("--dataset-root", default="dataset", type=Path)
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    add_path_arguments(parser)
     args = parser.parse_args()
-    report = inspect_dataset(resolve_dataset_root(args.dataset_root))
+    paths = resolve_paths_from_args(args)
+    report = inspect_dataset(resolve_dataset_root(args.dataset_root, paths))
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

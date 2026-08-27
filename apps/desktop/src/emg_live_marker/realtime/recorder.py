@@ -14,6 +14,7 @@ from typing import BinaryIO, TextIO
 
 from emg_live_marker.config import DEFAULT_BAUDRATE
 from emg_live_marker.device.protocol import EMG_CHANNELS, EMG_FS, IMU_FS, EmgPacket, ImuPacket
+from emg_live_marker.paths import resolve_project_paths
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,7 @@ class SessionRecorder:
 
     def start(
         self,
-        root_dir: Path | str = "recordings",
+        root_dir: Path | str | None = None,
         baudrate: int = DEFAULT_BAUDRATE,
         *,
         session_dir: Path | None = None,
@@ -56,7 +57,7 @@ class SessionRecorder:
             self.stop()
 
         if session_dir is None:
-            root = Path(root_dir)
+            root = Path(root_dir) if root_dir is not None else resolve_project_paths().recordings_root
             root.mkdir(parents=True, exist_ok=True)
             session_dir = self._make_session_dir(root)
         session_dir.mkdir(parents=True, exist_ok=False)

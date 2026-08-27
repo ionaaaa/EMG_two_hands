@@ -19,6 +19,7 @@ import torch
 
 from emg_live_marker.ml.effie_adapter import EffieGestureNet
 from emg_live_marker.ml.gesture_model import LABELS
+from emg_live_marker.paths import add_path_arguments, resolve_paths_from_args, resolve_project_path
 
 
 def import_pytorch_checkpoint(checkpoint_path: Path, output_path: Path) -> None:
@@ -44,9 +45,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Import EffiE checkpoint for local fine-tuning.")
     parser.add_argument("--effie-root", required=True, type=Path)
     parser.add_argument("--checkpoint-path", required=True, type=Path)
-    parser.add_argument("--output-path", default=Path("models") / "effie_imported_backbone.pt", type=Path)
+    parser.add_argument("--output-path", default=None, type=Path)
     parser.add_argument("--format", choices=["auto", "pytorch", "tensorflow"], default="auto")
+    add_path_arguments(parser)
     args = parser.parse_args()
+    paths = resolve_paths_from_args(args)
+    args.effie_root = resolve_project_path(args.effie_root, paths)
+    args.checkpoint_path = resolve_project_path(args.checkpoint_path, paths)
+    if args.output_path is None:
+        args.output_path = paths.models_root / "effie_imported_backbone.pt"
+    else:
+        args.output_path = resolve_project_path(args.output_path, paths)
 
     if not args.checkpoint_path.exists():
         raise FileNotFoundError(args.checkpoint_path)

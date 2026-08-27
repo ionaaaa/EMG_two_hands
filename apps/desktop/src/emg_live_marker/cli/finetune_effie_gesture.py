@@ -48,6 +48,7 @@ from emg_live_marker.cli.train_gesture_classifier import (
     read_csv_dicts,
     resolve_dataset_root,
 )
+from emg_live_marker.paths import add_path_arguments, resolve_paths_from_args, resolve_project_path
 
 
 @dataclass(frozen=True)
@@ -396,10 +397,10 @@ def run_cross_session_cv(dataset_root: Path, output_dir: Path, **kwargs: Any) ->
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Fine-tune EffiE-style gesture classifier.")
-    parser.add_argument("--dataset-root", default="dataset", type=Path)
     parser.add_argument("--effie-root", required=True, type=Path)
     parser.add_argument("--checkpoint-path", type=Path)
-    parser.add_argument("--output-dir", default=Path("models") / "effie_finetuned", type=Path)
+    parser.add_argument("--output-dir", default=None, type=Path)
+    add_path_arguments(parser)
     parser.add_argument("--mode", choices=["freeze_backbone", "finetune_all"], default="freeze_backbone")
     parser.add_argument("--epochs", default=50, type=int)
     parser.add_argument("--batch-size", default=128, type=int)
@@ -414,7 +415,15 @@ def main() -> int:
     parser.add_argument("--export-torchscript", action="store_true", default=True)
     parser.add_argument("--no-export-torchscript", dest="export_torchscript", action="store_false")
     args = parser.parse_args()
-    dataset_root = resolve_dataset_root(args.dataset_root)
+    paths = resolve_paths_from_args(args)
+    dataset_root = resolve_dataset_root(args.dataset_root, paths)
+    args.effie_root = resolve_project_path(args.effie_root, paths)
+    if args.checkpoint_path is not None:
+        args.checkpoint_path = resolve_project_path(args.checkpoint_path, paths)
+    if args.output_dir is None:
+        args.output_dir = paths.models_root / "effie_finetuned"
+    else:
+        args.output_dir = resolve_project_path(args.output_dir, paths)
     common = {
         "checkpoint_path": args.checkpoint_path,
         "mode": args.mode,
