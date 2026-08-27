@@ -8,6 +8,9 @@
 .agents/
 .codex/
 
+# Per-machine path overrides (data itself remains ignored by the rules below)
+.emg-paths.json
+
 # Python environments, caches, and build outputs
 .venv/
 venv/
@@ -28,14 +31,23 @@ dist/
 *.egg-info/
 
 # Local EMG captures and training datasets
-/2/emg_live_marker/emg_live_marker/dataset/
-/2/emg_live_marker/emg_live_marker/recordings/
-/2/emg_live_marker/recordings/
+/apps/desktop/emg_live_marker/dataset/
+/apps/desktop/emg_live_marker/recordings/
+/apps/desktop/recordings/
+/data/datasets/
+/data/recordings/
 *.bin
 
+# Generated models, reports, and runtime logs; keep only artifact documentation and manifests.
+/artifacts/models/
+/artifacts/reports/
+/artifacts/logs/
+/artifacts/duplicate-review/
+/artifacts/legacy-unclassified/
+
 # Generated ML models and experiment outputs
-/2/emg_live_marker/models/
-/2/emg_live_marker/reports/
+/apps/desktop/models/
+/apps/desktop/reports/
 *.pt
 *.ts
 
