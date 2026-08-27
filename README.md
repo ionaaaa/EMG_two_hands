@@ -6,19 +6,19 @@
 
 ## 当前代码位置
 
-- Python 桌面端：`2/emg_live_marker/`
-- 网页游戏与轻量调试 API：`UI_EMG/`
+- Python 桌面端：`apps/desktop/`
+- 网页游戏与轻量调试 API：`apps/web-game/`
 - 桌面端会在 `http://127.0.0.1:8766/events` 提供手势 SSE。
 - 网页游戏优先连接 8766；连接失败时回退到轻量 API 的 `http://127.0.0.1:8765/events`。
 
 ## Python 与依赖安装
 
-项目声明的最低 Python 版本是 **3.10**（见 `2/emg_live_marker/pyproject.toml`）。本分支的验证使用 Conda Python **3.11.5**。
+项目声明的最低 Python 版本是 **3.10**（见 `apps/desktop/pyproject.toml`）。本分支的验证使用 Conda Python **3.11.5**。
 
 从 Python 工程目录创建一个新的本机虚拟环境：
 
 ```bash
-cd 2/emg_live_marker
+cd apps/desktop
 python -m venv .venv
 
 # macOS / Linux
@@ -31,7 +31,7 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-仓库中的 `2/emg_live_marker/venv/` 是 Windows 可执行文件格式，不能在 macOS 上复用；请创建上述 `.venv/`。两种环境目录都被 `.gitignore` 排除。
+仓库中的 `apps/desktop/venv/` 是 Windows 可执行文件格式，不能在 macOS 上复用；请创建上述 `.venv/`。两种环境目录都被 `.gitignore` 排除。
 
 依赖包括 PySide6、pyqtgraph、pyserial、NumPy、SciPy、PyTorch；开发依赖包括 pytest 和 ruff。
 
@@ -40,7 +40,7 @@ python -m pip install -e ".[dev]"
 ### 桌面端
 
 ```bash
-cd 2/emg_live_marker
+cd apps/desktop
 
 # 不接硬件：使用模拟数据启动
 python -m emg_live_marker --simulate
@@ -60,7 +60,7 @@ python -m emg_live_marker --port /dev/cu.usbserial-XXXX --baudrate 921600
 
 ```bash
 # 在仓库根目录执行
-python -m http.server 8000 --directory UI_EMG
+python -m http.server 8000 --directory apps/web-game
 ```
 
 然后浏览器访问 `http://127.0.0.1:8000`。如桌面端正在运行，网页会连接其 8766 SSE 服务。
@@ -69,10 +69,10 @@ python -m http.server 8000 --directory UI_EMG
 
 ```bash
 # 终端 A：仓库根目录
-python UI_EMG/emg_api.py --host 127.0.0.1 --port 8765
+python apps/web-game/emg_api.py --host 127.0.0.1 --port 8765
 
 # 终端 B：向网页发送一条模拟手势
-python UI_EMG/send_demo_gesture.py fist 0.93 --hand left
+python apps/web-game/send_demo_gesture.py fist 0.93 --hand left
 ```
 
 ### 录制与采集
@@ -89,7 +89,7 @@ python UI_EMG/send_demo_gesture.py fist 0.93 --hand left
 以下命令均从 Python 工程根目录执行：
 
 ```bash
-cd 2/emg_live_marker
+cd apps/desktop
 
 # 常规训练；输出目录请使用新的、语义明确的实验名
 python scripts/train_gesture_classifier.py \
@@ -122,7 +122,7 @@ python scripts/evaluate_realtime_smoothing.py \
 在 2026-08-27、Conda Python 3.11.5 下，以下命令通过：
 
 ```bash
-cd 2/emg_live_marker
+cd apps/desktop
 python -m pytest -q \
   tests/test_processing.py \
   tests/test_protocol.py \
@@ -136,7 +136,7 @@ python -m pytest -q \
 完整测试命令为：
 
 ```bash
-cd 2/emg_live_marker
+cd apps/desktop
 QT_QPA_PLATFORM=offscreen python -m pytest -q
 ```
 
@@ -148,7 +148,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 
 ```bash
 # 终端 A：仓库根目录
-python UI_EMG/emg_api.py --host 127.0.0.1 --port 8765
+python apps/web-game/emg_api.py --host 127.0.0.1 --port 8765
 
 # 终端 B
 curl --fail --silent --show-error \
@@ -170,7 +170,7 @@ git ls-files | grep -E '(^|/)(venv|__pycache__|\.idea|data|artifacts)/|\.egg-inf
 本分支当前的结果为空：没有这些生成物被 Git 跟踪。如果未来发现明确不应进入仓库的已跟踪生成物，只取消跟踪而保留本地文件，例如：
 
 ```bash
-git rm -r --cached -- 2/emg_live_marker/venv
+git rm -r --cached -- apps/desktop/venv
 ```
 
 不要对 `dataset/`、`recordings/` 或其他不确定的数据目录批量执行 `git rm --cached`；先确认其用途、备份和数据保留策略。

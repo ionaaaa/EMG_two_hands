@@ -28,14 +28,14 @@ dist/
 *.egg-info/
 
 # Local EMG captures and training datasets
-/2/emg_live_marker/emg_live_marker/dataset/
-/2/emg_live_marker/emg_live_marker/recordings/
-/2/emg_live_marker/recordings/
+/apps/desktop/emg_live_marker/dataset/
+/apps/desktop/emg_live_marker/recordings/
+/apps/desktop/recordings/
 *.bin
 
 # Generated ML models and experiment outputs
-/2/emg_live_marker/models/
-/2/emg_live_marker/reports/
+/apps/desktop/models/
+/apps/desktop/reports/
 *.pt
 *.ts
 
