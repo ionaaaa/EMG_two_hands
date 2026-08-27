@@ -103,13 +103,13 @@ cd apps/desktop
 
 # 常规训练；输出目录请使用新的、语义明确的实验名
 $PYTHON scripts/train_gesture_classifier.py \
-  --dataset-root apps/desktop/emg_live_marker/dataset \
+  --dataset-root data/datasets \
   --output-dir apps/desktop/models/<run_id> \
   --device auto
 
 # EffiE 微调；需要自行提供外部 EffiE 工程和 checkpoint
 $PYTHON scripts/finetune_effie_gesture.py \
-  --dataset-root apps/desktop/emg_live_marker/dataset \
+  --dataset-root data/datasets \
   --effie-root ../../third_party/EffiE \
   --checkpoint-path ../../third_party/EffiE/checkpoints/<checkpoint_file> \
   --output-dir apps/desktop/models/<run_id> \
@@ -117,7 +117,7 @@ $PYTHON scripts/finetune_effie_gesture.py \
 
 # 回放评估实时平滑效果
 $PYTHON scripts/evaluate_realtime_smoothing.py \
-  --dataset-root apps/desktop/emg_live_marker/dataset \
+  --dataset-root data/datasets \
   --model-path apps/desktop/models/<run_id>/gesture_classifier.ts \
   --output-dir apps/desktop/reports/<run_id> \
   --session session_001
@@ -125,10 +125,10 @@ $PYTHON scripts/evaluate_realtime_smoothing.py \
 
 ## 数据与产物路径
 
-路径不依赖执行命令时的当前目录。在实际搬迁前，默认仍指向旧位置：
+路径不依赖执行命令时的当前目录。数据已迁移后，默认位置为：
 
-- dataset：`apps/desktop/emg_live_marker/dataset`
-- recordings：`apps/desktop/recordings`
+- dataset：`data/datasets`
+- recordings：`data/recordings`
 - artifacts：`apps/desktop` （其中 `models/` 与 `reports/` 为模型和报告目录）
 
 优先级从高到低是：命令行 `--dataset-root` / `--recordings-root` / `--artifacts-root`、路径配置文件、环境变量、上述默认值。本机可在仓库根目录创建未跟踪的 `.emg-paths.json`：

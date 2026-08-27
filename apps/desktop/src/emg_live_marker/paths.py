@@ -1,8 +1,7 @@
 """Resolve project data paths independently of the current working directory.
 
 Path values use the following precedence: command-line value, JSON config file,
-environment variable, then the legacy location currently used by this checkout.
-The legacy defaults deliberately keep data in place until a later migration.
+environment variable, then the repository data locations.
 """
 
 from __future__ import annotations
@@ -69,8 +68,8 @@ def resolve_project_paths(
     config = _load_config(config_path) if config_path is not None and config_path.exists() else {}
 
     defaults = {
-        "dataset_root": root / "apps" / "desktop" / "emg_live_marker" / "dataset",
-        "recordings_root": root / "apps" / "desktop" / "recordings",
+        "dataset_root": root / "data" / "datasets",
+        "recordings_root": root / "data" / "recordings",
         "artifacts_root": root / "apps" / "desktop",
     }
     values = {

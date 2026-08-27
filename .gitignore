@@ -34,6 +34,8 @@ dist/
 /apps/desktop/emg_live_marker/dataset/
 /apps/desktop/emg_live_marker/recordings/
 /apps/desktop/recordings/
+/data/datasets/
+/data/recordings/
 *.bin
 
 # Generated ML models and experiment outputs

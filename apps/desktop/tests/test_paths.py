@@ -3,13 +3,13 @@ import json
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 
 
-def test_defaults_keep_the_legacy_data_locations(tmp_path):
+def test_defaults_use_repository_data_locations(tmp_path):
     paths = resolve_project_paths(project_root=tmp_path, environ={})
 
     assert paths == ProjectPaths(
         project_root=tmp_path,
-        dataset_root=tmp_path / "apps" / "desktop" / "emg_live_marker" / "dataset",
-        recordings_root=tmp_path / "apps" / "desktop" / "recordings",
+        dataset_root=tmp_path / "data" / "datasets",
+        recordings_root=tmp_path / "data" / "recordings",
         artifacts_root=tmp_path / "apps" / "desktop",
         config_path=None,
     )

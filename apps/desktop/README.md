@@ -58,9 +58,8 @@ Real serial mode on Windows:
 ## Paths
 
 All project paths are resolved from the repository root, not from the current
-working directory. Until the data migration, defaults preserve the existing
-locations: `apps/desktop/emg_live_marker/dataset`, `apps/desktop/recordings`,
-and `apps/desktop` for artifacts. Use `--dataset-root`, `--recordings-root`,
+working directory. Defaults are `data/datasets`, `data/recordings`, and
+`apps/desktop` for artifacts. Use `--dataset-root`, `--recordings-root`,
 and `--artifacts-root` to override them. A local repository-root
 `.emg-paths.json` can provide the same three keys and is ignored by Git; its
 values override environment variables (`EMG_DATASET_ROOT`, `EMG_RECORDINGS_ROOT`,
@@ -74,7 +73,7 @@ set for the three gestures, then train a same-day game model:
 
 ```powershell
 & $python scripts/train_gesture_classifier.py ^
-  --dataset-root apps/desktop/emg_live_marker/dataset ^
+  --dataset-root data/datasets ^
   --output-dir apps/desktop/models/calibration_game_model ^
   --preset calibration ^
   --device auto
@@ -100,7 +99,7 @@ Freeze the EffiE-style backbone and train a 4-class game head:
 
 ```powershell
 & $python scripts\finetune_effie_gesture.py ^
-  --dataset-root apps/desktop/emg_live_marker/dataset ^
+  --dataset-root data/datasets ^
   --effie-root ..\..\third_party\EffiE ^
   --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
   --output-dir apps/desktop/models\effie_finetuned ^
@@ -120,7 +119,7 @@ learning rate:
 
 ```powershell
 & $python scripts\finetune_effie_gesture.py ^
-  --dataset-root apps/desktop/emg_live_marker/dataset ^
+  --dataset-root data/datasets ^
   --effie-root ..\..\third_party\EffiE ^
   --checkpoint-path ..\..\third_party\EffiE\checkpoints\<checkpoint_file> ^
   --output-dir apps/desktop/models\effie_finetuned_all ^
@@ -142,7 +141,7 @@ and the model outputs `rest / fist / open-palm / pinch`.
 By default, recordings are written under:
 
 ```text
-apps/desktop/recordings\YYYY-MM-DD_HH-MM-SS\
+data/recordings\YYYY-MM-DD_HH-MM-SS\
 ```
 
 Each session contains `metadata.json`, `emg.csv`, `imu.csv`, `events.csv`, and `raw_packets.bin`.
