@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EMG Rhythm — 双人手势音游</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <!-- 左栏：左手控制 -->
+      <aside class="control-panel side-left" aria-label="左手控制">
+        <div class="panel-block">
+          <h1>EMG Rhythm</h1>
+          <p class="subtle">左手控制 · Left Player</p>
+        </div>
+
+        <div class="panel-block live-recog offline" data-hand="left">
+          <div class="live-head">
+            <span>实时识别 · 左手</span>
+            <span class="conn-pill"><i class="conn-dot"></i><strong class="conn-text">未连接</strong></span>
+          </div>
+          <div class="live-main">
+            <div class="live-gesture-big">REST</div>
+            <div class="live-gesture-cn">放松</div>
+            <div class="live-conf-track"><div class="live-conf-fill"></div></div>
+            <div class="live-conf-row"><span>置信度</span><strong class="live-conf-num">0%</strong></div>
+          </div>
+          <div class="live-probs">
+            <div class="prob-row" data-gesture="rest"><span class="prob-dot"></span><small>放松</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
+            <div class="prob-row" data-gesture="fist"><span class="prob-dot"></span><small>握拳</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
+            <div class="prob-row" data-gesture="open-palm"><span class="prob-dot"></span><small>摊掌</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
+            <div class="prob-row" data-gesture="pinch"><span class="prob-dot"></span><small>捏合</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
+          </div>
+          <div class="live-meta">
+            <span class="live-source">等待 emg_live_marker 启动…</span>
+            <span class="live-ctrl-state"></span>
+          </div>
+        </div>
+
+        <div class="hand-group" id="leftHandBox">
+          <h2>LEFT 左手 <small>A S D F</small></h2>
+          <div class="gesture-grid" role="group" aria-label="左手手势">
+            <button class="gesture-btn fist" data-hand="left" data-gesture="fist" type="button"><span class="swatch"></span><span><strong>Fist</strong><small>红 · 握拳</small></span></button>
+            <button class="gesture-btn palm" data-hand="left" data-gesture="open-palm" type="button"><span class="swatch"></span><span><strong>Open</strong><small>蓝 · 摊掌</small></span></button>
+            <button class="gesture-btn pinch" data-hand="left" data-gesture="pinch" type="button"><span class="swatch"></span><span><strong>Pinch</strong><small>黄 · 捏合</small></span></button>
+            <button class="gesture-btn rest" data-hand="left" data-gesture="rest" type="button"><span class="swatch"></span><span><strong>Rest</strong><small>绿 · 松手</small></span></button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 中栏：游戏画布 + 公共控件 -->
+      <section class="game-stage" aria-label="EMG 双轨手势节奏游戏">
+        <div class="hud">
+          <div class="metric"><span>Score</span><strong id="score">0</strong></div>
+          <div class="metric"><span>Combo</span><strong id="combo">0</strong></div>
+          <div class="metric"><span>Energy</span><strong id="energyLabel">0%</strong></div>
+          <div class="metric"><span>Best</span><strong id="bestCombo">0</strong></div>
+        </div>
+
+        <div class="runner-wrap">
+          <canvas id="gameCanvas" width="1120" height="640" aria-label="Rhythm game canvas"></canvas>
+          <div class="scoreboard" data-hand="left">
+            <div class="sb-title">左手 L</div>
+            <div class="sb-stat"><span>Score</span><strong class="sb-score">0</strong></div>
+            <div class="sb-stat"><span>Acc</span><strong class="sb-acc">0%</strong></div>
+            <div class="sb-stat"><span>Combo</span><strong class="sb-combo">0</strong></div>
+          </div>
+          <div class="scoreboard" data-hand="right">
+            <div class="sb-title">右手 R</div>
+            <div class="sb-stat"><span>Score</span><strong class="sb-score">0</strong></div>
+            <div class="sb-stat"><span>Acc</span><strong class="sb-acc">0%</strong></div>
+            <div class="sb-stat"><span>Combo</span><strong class="sb-combo">0</strong></div>
+          </div>
+          <button class="restart-btn" id="startBtn" type="button">Start</button>
+        </div>
+
+        <div class="message-strip">
+          <p id="gameMessage">红=握拳 蓝=摊掌 黄=捏合。选模式后按 Start / 空格开始。</p>
+        </div>
+
+        <div class="panel-block compact">
+          <div class="label-row"><span>音效 Sound</span><strong id="musicState">开</strong></div>
+          <div class="label-row"><span>BPM</span><strong id="bpmVal">80</strong></div>
+          <input type="range" id="bpmSlider" class="slider" min="60" max="140" value="80" step="1">
+          <button class="music-btn" id="musicToggle" type="button">切换音效</button>
+        </div>
+
+        <div class="panel-block compact">
+          <div class="label-row"><span>Mode 模式</span></div>
+          <div class="mode-switch" role="group" aria-label="操作模式">
+            <button class="mode-btn active" data-mode="both" type="button">双人</button>
+            <button class="mode-btn" data-mode="left" type="button">单手-L</button>
+            <button class="mode-btn" data-mode="right" type="button">单手-R</button>
+          </div>
+        </div>
+
+        <div class="panel-block compact">
+          <div class="label-row"><span>Energy</span><strong id="energyPct">0%</strong></div>
+          <div class="confidence-track"><div class="confidence-fill" id="energyFill"></div></div>
+        </div>
+
+        <div class="panel-block compact">
+          <div class="label-row"><span>Realtime API</span><strong id="bridgeStatus">offline</strong></div>
+        </div>
+
+        <div class="panel-block compact">
+          <div class="label-row"><span>Keyboard</span><strong>A S D F · J K L ;</strong></div>
+          <div class="label-row"><span>Start / Restart</span><strong>Space</strong></div>
+        </div>
+
+        <div class="panel-block">
+          <h2>Adapter Hook</h2>
+          <code>window.dispatchGesture("fist", 0.92, "left")</code>
+          <code>POST /gesture {gesture,confidence,hand}</code>
+        </div>
+
+        <div class="event-log" id="eventLog" aria-live="polite"></div>
+      </section>
+
+      <!-- 右栏：右手控制 -->
+      <aside class="control-panel side-right" aria-label="右手控制">
+        <div class="panel-block">
+          <h1>EMG Rhythm</h1>
+          <p class="subtle">右手控制 · Right Player</p>
+        </div>
+
+        <div class="panel-block live-recog offline" data-hand="right">
+          <div class="live-head">
+            <span>实时识别 · 右手</span>
+            <span class="conn-pill"><i class="conn-dot"></i><strong class="conn-text">未连接</strong></span>
+          </div>
+          <div class="live-main">
+            <div class="live-gesture-big">REST</div>
+            <div class="live-gesture-cn">放松</div>
+            <div class="live-conf-track"><div class="live-conf-fill"></div></div>
+            <div class="live-conf-row"><span>置信度</span><strong class="live-conf-num">0%</strong></div>
+          </div>
+          <div class="live-probs">
+            <div class="prob-row" data-gesture="rest"><span class="prob-dot"></span><small>放松</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
+            <div class="prob-row" data-gesture="fist"><span class="prob-dot"></span><small>握拳</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
+            <div class="prob-row" data-gesture="open-palm"><span class="prob-dot"></span><small>摊掌</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
+            <div class="prob-row" data-gesture="pinch"><span class="prob-dot"></span><small>捏合</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
+          </div>
+          <div class="live-meta">
+            <span class="live-source">等待 emg_live_marker 启动…</span>
+            <span class="live-ctrl-state"></span>
+          </div>
+        </div>
+
+        <div class="hand-group" id="rightHandBox">
+          <h2>RIGHT 右手 <small>J K L ;</small></h2>
+          <div class="gesture-grid" role="group" aria-label="右手手势">
+            <button class="gesture-btn fist" data-hand="right" data-gesture="fist" type="button"><span class="swatch"></span><span><strong>Fist</strong><small>红 · 握拳</small></span></button>
+            <button class="gesture-btn palm" data-hand="right" data-gesture="open-palm" type="button"><span class="swatch"></span><span><strong>Open</strong><small>蓝 · 摊掌</small></span></button>
+            <button class="gesture-btn pinch" data-hand="right" data-gesture="pinch" type="button"><span class="swatch"></span><span><strong>Pinch</strong><small>黄 · 捏合</small></span></button>
+            <button class="gesture-btn rest" data-hand="right" data-gesture="rest" type="button"><span class="swatch"></span><span><strong>Rest</strong><small>绿 · 松手</small></span></button>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>

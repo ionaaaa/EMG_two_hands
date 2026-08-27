@@ -1,0 +1,45 @@
+# macOS metadata and resource-fork sidecars
+.DS_Store
+._*
+
+# Local IDE and agent settings
+.idea/
+.vscode/
+.agents/
+.codex/
+
+# Python environments, caches, and build outputs
+.venv/
+venv/
+**/.venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local EMG captures and training datasets
+/2/emg_live_marker/emg_live_marker/dataset/
+/2/emg_live_marker/emg_live_marker/recordings/
+/2/emg_live_marker/recordings/
+*.bin
+
+# Generated ML models and experiment outputs
+/2/emg_live_marker/models/
+/2/emg_live_marker/reports/
+*.pt
+*.ts
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.temp
