@@ -37,7 +37,7 @@ def create_window(args: argparse.Namespace, paths: ProjectPaths) -> MainWindow |
     """Create the mode-specific top-level window without starting its event loop."""
 
     if args.mode == "student":
-        return StudentMainWindow(paths=paths)
+        return StudentMainWindow(paths=paths, simulate=args.simulate)
     simulate = args.simulate or args.port is None
     return MainWindow(simulate=simulate, port=args.port, baudrate=args.baudrate, paths=paths)
 

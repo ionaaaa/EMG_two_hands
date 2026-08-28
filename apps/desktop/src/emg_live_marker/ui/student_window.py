@@ -22,8 +22,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from emg_live_marker.device.check_service import (
+    DeviceCheckResult,
+    DeviceCheckService,
+    DeviceCheckThresholds,
+)
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
-from emg_live_marker.ui.student_pages import COURSE_ENTRIES, CourseEntry, create_course_page
+from emg_live_marker.ui.student_pages import (
+    COURSE_ENTRIES,
+    CourseEntry,
+    DeviceCheckPage,
+    create_collection_gate_page,
+    create_course_page,
+)
 
 TEACHING_CONFIG_RELATIVE_PATH = Path("configs") / "teaching" / "yucai.json"
 
@@ -65,7 +76,14 @@ def load_yucai_course_config(paths: ProjectPaths | None = None) -> dict[str, Any
 class StudentMainWindow(QMainWindow):
     """A Chinese course-navigation shell with no real-time business logic."""
 
-    def __init__(self, paths: ProjectPaths | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        paths: ProjectPaths | None = None,
+        *,
+        simulate: bool = False,
+        device_check_service: DeviceCheckService | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.paths = paths or resolve_project_paths()
         self.course_config = load_yucai_course_config(self.paths)
@@ -73,6 +91,13 @@ class StudentMainWindow(QMainWindow):
         self.course_entries = COURSE_ENTRIES
         self.course_entry_buttons: list[QPushButton] = []
         self._entry_page_indexes: dict[str, int] = {}
+        self.device_check_service = device_check_service or DeviceCheckService(
+            thresholds=DeviceCheckThresholds.from_config(self.course_config),
+            simulate=simulate,
+            parent=self,
+        )
+        self.session_device_result: DeviceCheckResult = self.device_check_service.result
+        self.device_check_service.result_changed.connect(self._on_device_check_result)
 
         self.setWindowTitle(f"{self.course['name']} - 学生模式")
         self.resize(1000, 720)
@@ -82,9 +107,16 @@ class StudentMainWindow(QMainWindow):
         self.home_page = self._create_home_page()
         self._home_page_index = self._stack.addWidget(self.home_page)
         for entry in self.course_entries:
-            self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
-                create_course_page(entry, self.show_home)
-            )
+            if entry.identifier == "connect-bracelet":
+                self.device_check_page = DeviceCheckPage(self.start_device_check, self.show_home)
+                self._entry_page_indexes[entry.identifier] = self._stack.addWidget(self.device_check_page)
+            else:
+                self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
+                    create_course_page(entry, self.show_home)
+                )
+        self.collection_gate_page = create_collection_gate_page(self.show_home, self.open_device_check)
+        self._collection_gate_index = self._stack.addWidget(self.collection_gate_page)
+        self._on_device_check_result(self.session_device_result)
 
         self.show_home()
 
@@ -133,9 +165,26 @@ class StudentMainWindow(QMainWindow):
 
         if not entry.available:
             return
+        if entry.identifier == "collect-gestures" and not self.session_device_result.collection_ready:
+            self._stack.setCurrentIndex(self._collection_gate_index)
+            return
         self._stack.setCurrentIndex(self._entry_page_indexes[entry.identifier])
+
+    def open_device_check(self) -> None:
+        self._stack.setCurrentIndex(self._entry_page_indexes["connect-bracelet"])
+
+    def start_device_check(self) -> None:
+        self.device_check_service.start()
+
+    def _on_device_check_result(self, result: DeviceCheckResult) -> None:
+        self.session_device_result = result
+        self.device_check_page.set_result(result)
 
     def show_home(self) -> None:
         """Return from a course page to the course home."""
 
         self._stack.setCurrentIndex(self._home_page_index)
+
+    def closeEvent(self, event) -> None:
+        self.device_check_service.close()
+        super().closeEvent(event)

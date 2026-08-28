@@ -53,6 +53,15 @@
     "personal_model_path": "apps/desktop/models/{run_id}/gesture_classifier.ts",
     "competition_results_path": "apps/desktop/reports/teaching/yucai/{competition_id}/{student_id}"
   },
+  "student_device_check": {
+    "observe_duration_ms": 1500,
+    "min_samples": 50,
+    "min_rate_sps": 200.0,
+    "max_rate_sps": 300.0,
+    "max_rate_spread_sps": 40.0,
+    "flat_channel_std_uv": 0.5,
+    "max_abs_value_uv": 20000.0
+  },
   "student_mode": {
     "student": {
       "student_id": "",

@@ -53,7 +53,7 @@ def test_create_window_routes_each_mode_without_starting_real_components(monkeyp
     assert isinstance(teacher_window, FakeTeacherWindow)
     assert isinstance(student_window, FakeStudentWindow)
     assert created[0][1]["simulate"] is True
-    assert created[1][1] == {"paths": paths}
+    assert created[1][1] == {"paths": paths, "simulate": False}
 
 
 def test_student_window_contains_all_course_entries(app) -> None:
