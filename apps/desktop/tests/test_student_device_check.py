@@ -253,7 +253,7 @@ def test_collection_navigation_is_gated_until_device_check_passes(app, threshold
         service.result_changed.emit(healthy_result())
         app.processEvents()
         window.open_course_page(collection_entry)
-        assert window._stack.currentWidget().objectName() == "student-page-collect-gestures"
+        assert window._stack.currentWidget().objectName() == "student-collection-page"
     finally:
         window.close()
 

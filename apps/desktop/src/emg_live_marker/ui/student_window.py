@@ -8,6 +8,7 @@ or game services.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -28,10 +30,12 @@ from emg_live_marker.device.check_service import (
     DeviceCheckThresholds,
 )
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
+from emg_live_marker.realtime.collection import CollectionController, CollectionPlan
 from emg_live_marker.ui.student_pages import (
     COURSE_ENTRIES,
     CourseEntry,
     DeviceCheckPage,
+    StudentCollectionPage,
     create_collection_gate_page,
     create_course_page,
 )
@@ -98,6 +102,14 @@ class StudentMainWindow(QMainWindow):
         )
         self.session_device_result: DeviceCheckResult = self.device_check_service.result
         self.device_check_service.result_changed.connect(self._on_device_check_result)
+        self._collection_side: str | None = None
+        self.collection_controller = CollectionController(
+            device_ready=self._selected_side_ready,
+            parent=self,
+        )
+        self.collection_controller.state_changed.connect(self._on_collection_snapshot)
+        self.collection_controller.finished.connect(self._on_collection_finished)
+        self.device_check_service.emg_packets_received.connect(self._on_device_emg_packets)
 
         self.setWindowTitle(f"{self.course['name']} - 学生模式")
         self.resize(1000, 720)
@@ -110,6 +122,15 @@ class StudentMainWindow(QMainWindow):
             if entry.identifier == "connect-bracelet":
                 self.device_check_page = DeviceCheckPage(self.start_device_check, self.show_home)
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(self.device_check_page)
+            elif entry.identifier == "collect-gestures":
+                self.collection_page = StudentCollectionPage(
+                    self.start_collection,
+                    self.toggle_collection_pause,
+                    self.collection_controller.repeat_current_or_last,
+                    self.end_collection,
+                    self.show_home,
+                )
+                self._entry_page_indexes[entry.identifier] = self._stack.addWidget(self.collection_page)
             else:
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
                     create_course_page(entry, self.show_home)
@@ -179,12 +200,117 @@ class StudentMainWindow(QMainWindow):
     def _on_device_check_result(self, result: DeviceCheckResult) -> None:
         self.session_device_result = result
         self.device_check_page.set_result(result)
+        self.collection_page.set_available_sides(
+            result.left.ready_for_collection,
+            result.right.ready_for_collection,
+        )
+        self.collection_controller.check_device_state()
+
+    def _on_device_emg_packets(self, side: str, packets: list) -> None:
+        if side == self._collection_side:
+            self.collection_controller.on_emg_packets(packets)
+
+    def _selected_side_ready(self) -> bool:
+        side = self._collection_side
+        if side == "left":
+            return self.session_device_result.left.ready_for_collection
+        if side == "right":
+            return self.session_device_result.right.ready_for_collection
+        return False
+
+    def start_collection(self) -> None:
+        anonymous_id = self.collection_page.anonymous_id_edit.text().strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", anonymous_id) or ".." in anonymous_id:
+            self.collection_page.message_label.setText("编号不能为空，且只能使用字母、数字、下划线和短横线")
+            return
+        side = self.collection_page.selected_side()
+        if side is None or not self._selected_result_ready(side):
+            self.collection_page.message_label.setText("请先完成手环连接与信号检查")
+            return
+        collection = self.course_config.get("collection", {})
+        actions = collection.get("actions", []) if isinstance(collection, dict) else []
+        gestures = tuple(action["id"] for action in actions if isinstance(action, dict) and "id" in action)
+        names = {
+            action["id"]: action.get("display_name_zh", action["id"])
+            for action in actions
+            if isinstance(action, dict) and "id" in action
+        }
+        if not gestures or set(gestures) != {"fist", "finger_spread", "thumb_index_pinch"}:
+            self.collection_page.message_label.setText("课程动作配置无效，请联系老师")
+            return
+        self._collection_side = side
+        plan = CollectionPlan(
+            subject_id=anonymous_id,
+            side=side,
+            course_id=str(self.course["id"]),
+            trials_per_gesture=int(self.collection_page.trials_combo.currentText()),
+            gestures=gestures,
+            gesture_names=names,
+            rest_before_s=float(collection.get("rest_before_s", 0.5)),
+            hold_s=float(collection.get("hold_s", 1.5)),
+            rest_after_s=float(collection.get("rest_after_s", 1.0)),
+            randomize=bool(collection.get("randomize_action_order", True)),
+            min_sample_ratio=float(self.course_config.get("student_device_check", {}).get("trial_min_sample_ratio", 0.8)),
+        )
+        if not self.collection_controller.start(plan, self.paths.dataset_root, self.course_config):
+            self.collection_page.message_label.setText("无法创建采集会话，请稍后重试")
+
+    def _selected_result_ready(self, side: str) -> bool:
+        return self.session_device_result.left.ready_for_collection if side == "left" else self.session_device_result.right.ready_for_collection
+
+    def toggle_collection_pause(self) -> None:
+        if self.collection_controller.paused:
+            self.collection_controller.resume()
+        else:
+            self.collection_controller.pause()
+
+    def end_collection(self) -> None:
+        if not self.collection_controller.active:
+            return
+        answer = QMessageBox.question(self, "提前结束", "确认提前结束并保存已完成数据吗？")
+        if answer == QMessageBox.StandardButton.Yes:
+            self.collection_controller.end("partial")
+
+    def _on_collection_snapshot(self, snapshot: object) -> None:
+        self.collection_page.set_snapshot(snapshot)
+
+    def _on_collection_finished(self, result: dict) -> None:
+        counts = {
+            gesture: sum(
+                trial.gesture == gesture and trial.status == "completed"
+                for trial in self.collection_controller.trials
+            )
+            for gesture in ("fist", "finger_spread", "thumb_index_pinch")
+        }
+        session_dir = result.get("session_dir")
+        relative = ""
+        if isinstance(session_dir, Path):
+            try:
+                relative = str(session_dir.relative_to(self.paths.project_root))
+            except ValueError:
+                relative = session_dir.name
+        message = "采集完成并已保存" if result.get("status") == "completed" else "部分完成，已安全保存"
+        self.collection_page.show_completion(
+            f"{message}\n编号：{self.collection_controller.plan.subject_id}\n"
+            f"{('左手' if self._collection_side == 'left' else '右手')}\n"
+            f"握拳 {counts['fist']} 次，张开 {counts['finger_spread']} 次，轻捏 {counts['thumb_index_pinch']} 次\n"
+            f"重做/无效：{sum(t.status == 'repeated' for t in self.collection_controller.trials)}/"
+            f"{sum(t.status == 'invalid' for t in self.collection_controller.trials)}\n"
+            f"会话：{result.get('session_id')}\n保存位置：{relative}"
+        )
 
     def show_home(self) -> None:
         """Return from a course page to the course home."""
 
+        if self.collection_controller.active:
+            answer = QMessageBox.question(self, "采集进行中", "返回首页将提前结束并保存已完成数据，是否继续？")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            self.collection_controller.end("partial")
         self._stack.setCurrentIndex(self._home_page_index)
 
     def closeEvent(self, event) -> None:
+        if self.collection_controller.active:
+            self.collection_controller.end("interrupted")
         self.device_check_service.close()
         super().closeEvent(event)

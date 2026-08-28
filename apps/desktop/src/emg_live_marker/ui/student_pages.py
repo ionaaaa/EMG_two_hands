@@ -10,7 +10,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QComboBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from emg_live_marker.device.check_service import ConnectionState, DeviceCheckResult
 
@@ -208,3 +219,138 @@ def create_collection_gate_page(go_home: Callable[[], None], open_device_check: 
     back_button.clicked.connect(go_home)
     layout.addWidget(back_button, alignment=Qt.AlignmentFlag.AlignHCenter)
     return page
+
+
+class StudentCollectionPage(QWidget):
+    """Chinese guided collection controls with no system or model settings."""
+
+    def __init__(
+        self,
+        start: Callable[[], None],
+        pause: Callable[[], None],
+        repeat: Callable[[], None],
+        end: Callable[[], None],
+        go_home: Callable[[], None],
+    ) -> None:
+        super().__init__()
+        self.setObjectName("student-collection-page")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(44, 30, 44, 30)
+        layout.setSpacing(12)
+        title = QLabel("采集我的手势")
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        title.setStyleSheet("font-size: 28px; font-weight: 700;")
+        layout.addWidget(title)
+        hint = QLabel("请输入匿名编号，不要填写真实姓名。")
+        hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(hint)
+
+        self.anonymous_id_edit = QLineEdit()
+        self.anonymous_id_edit.setObjectName("anonymous-id")
+        self.anonymous_id_edit.setPlaceholderText("匿名学生/小组编号，例如 group_01")
+        layout.addWidget(self.anonymous_id_edit)
+
+        side_row = QHBoxLayout()
+        side_row.addWidget(QLabel("采集手："))
+        self.left_radio = QRadioButton("左手")
+        self.right_radio = QRadioButton("右手")
+        self.side_group = QButtonGroup(self)
+        self.side_group.addButton(self.left_radio)
+        self.side_group.addButton(self.right_radio)
+        side_row.addWidget(self.left_radio)
+        side_row.addWidget(self.right_radio)
+        side_row.addStretch(1)
+        layout.addLayout(side_row)
+
+        count_row = QHBoxLayout()
+        count_row.addWidget(QLabel("每类动作次数："))
+        self.trials_combo = QComboBox()
+        self.trials_combo.setObjectName("trials-per-gesture")
+        self.trials_combo.addItems(["5", "10", "15"])
+        self.trials_combo.setCurrentText("10")
+        count_row.addWidget(self.trials_combo)
+        count_row.addStretch(1)
+        layout.addLayout(count_row)
+
+        self.prompt_label = QLabel("请先完成手环连接与信号检查")
+        self.prompt_label.setObjectName("collection-prompt")
+        self.prompt_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.prompt_label.setStyleSheet("font-size: 24px; font-weight: 700;")
+        layout.addWidget(self.prompt_label)
+        self.countdown_label = QLabel("倒计时：--")
+        self.countdown_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.countdown_label)
+        self.progress_label = QLabel("完成进度：0 / 0")
+        self.progress_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.progress_label)
+        self.message_label = QLabel("")
+        self.message_label.setObjectName("collection-message")
+        self.message_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.message_label.setWordWrap(True)
+        layout.addWidget(self.message_label)
+        layout.addStretch(1)
+
+        buttons = QGridLayout()
+        self.start_button = QPushButton("开始采集")
+        self.pause_button = QPushButton("暂停")
+        self.repeat_button = QPushButton("重做当前或最近一次动作")
+        self.end_button = QPushButton("提前结束")
+        self.home_button = QPushButton("返回首页")
+        for button in (self.start_button, self.pause_button, self.repeat_button, self.end_button):
+            button.setMinimumHeight(42)
+        self.pause_button.setEnabled(False)
+        self.repeat_button.setEnabled(False)
+        self.end_button.setEnabled(False)
+        self.start_button.clicked.connect(start)
+        self.pause_button.clicked.connect(pause)
+        self.repeat_button.clicked.connect(repeat)
+        self.end_button.clicked.connect(end)
+        self.home_button.clicked.connect(go_home)
+        buttons.addWidget(self.start_button, 0, 0)
+        buttons.addWidget(self.pause_button, 0, 1)
+        buttons.addWidget(self.repeat_button, 1, 0, 1, 2)
+        buttons.addWidget(self.end_button, 2, 0)
+        buttons.addWidget(self.home_button, 2, 1)
+        layout.addLayout(buttons)
+
+    def selected_side(self) -> str | None:
+        if self.left_radio.isChecked():
+            return "left"
+        if self.right_radio.isChecked():
+            return "right"
+        return None
+
+    def set_available_sides(self, left: bool, right: bool) -> None:
+        self.left_radio.setEnabled(left)
+        self.right_radio.setEnabled(right)
+        if left and not right:
+            self.left_radio.setChecked(True)
+        elif right and not left:
+            self.right_radio.setChecked(True)
+        elif not left and not right:
+            self.left_radio.setAutoExclusive(False)
+            self.right_radio.setAutoExclusive(False)
+            self.left_radio.setChecked(False)
+            self.right_radio.setChecked(False)
+            self.left_radio.setAutoExclusive(True)
+            self.right_radio.setAutoExclusive(True)
+
+    def set_snapshot(self, snapshot: object) -> None:
+        prompt = getattr(snapshot, "prompt", "请准备")
+        self.prompt_label.setText(prompt)
+        self.countdown_label.setText(f"倒计时：{getattr(snapshot, 'remaining_s', 0.0):.1f} 秒")
+        self.progress_label.setText(
+            f"完成进度：{getattr(snapshot, 'completed', 0)} / {getattr(snapshot, 'total', 0)}"
+        )
+        self.message_label.setText(getattr(snapshot, "message", ""))
+        active = bool(getattr(snapshot, "active", False))
+        paused = bool(getattr(snapshot, "paused", False))
+        self.start_button.setEnabled(not active)
+        self.pause_button.setEnabled(active)
+        self.pause_button.setText("继续" if paused else "暂停")
+        self.repeat_button.setEnabled(active)
+        self.end_button.setEnabled(active)
+
+    def show_completion(self, summary: str) -> None:
+        self.prompt_label.setText(summary)
+        self.message_label.setText(summary)

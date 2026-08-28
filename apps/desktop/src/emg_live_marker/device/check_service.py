@@ -153,6 +153,7 @@ class DeviceCheckService(QObject):
     """Enumerate, observe, and assess zero to two reliably assigned devices."""
 
     result_changed = Signal(object)
+    emg_packets_received = Signal(str, list)
 
     def __init__(
         self,
@@ -356,6 +357,7 @@ class DeviceCheckService(QObject):
         if values and self._first_emg_at[side] is None:
             self._first_emg_at[side] = monotonic()
         self._samples[side].extend(values)
+        self.emg_packets_received.emit(side, list(packets))
         if self._checking:
             self._publish_progress()
 

@@ -60,7 +60,8 @@
     "max_rate_sps": 300.0,
     "max_rate_spread_sps": 40.0,
     "flat_channel_std_uv": 0.5,
-    "max_abs_value_uv": 20000.0
+    "max_abs_value_uv": 20000.0,
+    "trial_min_sample_ratio": 0.8
   },
   "student_mode": {
     "student": {
