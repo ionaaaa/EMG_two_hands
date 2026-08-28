@@ -43,17 +43,25 @@ $PYTHON -m pip install --no-deps -e apps/desktop
 ## 启动桌面端
 
 ```bash
-# 无硬件：模拟 EMG 数据
+# 教师模式（默认）：无硬件时使用模拟 EMG 数据
 $PYTHON -m emg_live_marker --simulate
 
-# 实际设备：替换为实际串口名
+# 教师模式：实际设备，替换为实际串口名
 $PYTHON -m emg_live_marker --port /dev/cu.usbserial-XXXX --baudrate 921600
 
 # Windows 示例
 # $PYTHON -m emg_live_marker --port COM4 --baudrate 921600
+
+# 学生模式：显示育才课程导航框架
+$PYTHON -m emg_live_marker --mode student
+
+# 显式进入原有教师界面（与未传 --mode 的行为相同）
+$PYTHON -m emg_live_marker --mode teacher --simulate
 ```
 
-不带参数也会启动模拟数据源。桌面端启动本地 SSE 服务 `http://127.0.0.1:8766/events`，向网页游戏发送左右手手势事件。
+未传 `--mode` 时默认为教师模式，保持原有行为；不带参数也会启动模拟数据源。教师模式启动本地 SSE 服务 `http://127.0.0.1:8766/events`，向网页游戏发送左右手手势事件。
+
+学生模式读取 `configs/teaching/yucai.json` 的课程名称和语言，当前仅提供八个课程入口与页面导航。其中“设置游戏指令”“训练和优化我的模型”明确标记为“后续课程开放”且不可点击；其余入口页面明确标记为“功能接入中”，尚未接入设备连接、采集、识别、训练或挑战赛业务流程。
 
 桌面窗口中的 **Start Recording** 会将录制写入 `data/recordings/YYYY-MM-DD_HH-MM-SS/`；**Start Collection** 会将采集写入 `data/datasets/<subject_id>/<session_id>/`。一个会话通常包含 `metadata.json`、`emg.csv`、`imu.csv`、`events.csv` 和 `raw_packets.bin`。
 

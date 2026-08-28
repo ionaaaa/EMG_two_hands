@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "course": {
+    "id": "yucai",
+    "name": "育才 EMG 双手手势课程",
+    "language": "zh-CN"
+  },
+  "collection": {
+    "actions": [
+      {
+        "id": "fist",
+        "display_name_zh": "全力握拳"
+      },
+      {
+        "id": "finger_spread",
+        "display_name_zh": "五指完全张开"
+      },
+      {
+        "id": "thumb_index_pinch",
+        "display_name_zh": "拇食两指轻捏"
+      }
+    ],
+    "trials_per_action": 10,
+    "rest_before_s": 0.5,
+    "hold_s": 1.5,
+    "rest_after_s": 1.0,
+    "trial_duration_s": 3.0,
+    "randomize_action_order": true
+  },
+  "realtime_decoding": {
+    "standard_teaching_model_path": "apps/desktop/models/effie_real_full_v2_continue/gesture_classifier.ts",
+    "confidence_threshold": 0.7,
+    "smoothing_frames": 5,
+    "change_confirmations": 2
+  },
+  "game": {
+    "gestures": [
+      "fist",
+      "open-palm"
+    ],
+    "rest": {
+      "fixed": true,
+      "action": "none"
+    },
+    "pinch": {
+      "enabled_by_default": false,
+      "participates_in_game": false
+    }
+  },
+  "storage": {
+    "dataset_path": "data/datasets/{student_id}/{session_id}",
+    "recording_path": "data/recordings/{recording_id}",
+    "personal_model_path": "apps/desktop/models/{run_id}/gesture_classifier.ts",
+    "competition_results_path": "apps/desktop/reports/teaching/yucai/{competition_id}/{student_id}"
+  },
+  "student_mode": {
+    "student": {
+      "student_id": "",
+      "display_name": ""
+    },
+    "allowed_fields": [
+      "student.student_id",
+      "student.display_name",
+      "collection.trials_per_action"
+    ],
+    "locked_fields": [
+      "schema_version",
+      "course.id",
+      "course.language",
+      "collection.actions",
+      "collection.rest_before_s",
+      "collection.hold_s",
+      "collection.rest_after_s",
+      "collection.trial_duration_s",
+      "collection.randomize_action_order",
+      "realtime_decoding.standard_teaching_model_path",
+      "realtime_decoding.confidence_threshold",
+      "realtime_decoding.smoothing_frames",
+      "realtime_decoding.change_confirmations",
+      "game.gestures",
+      "game.rest",
+      "game.pinch",
+      "storage"
+    ]
+  }
+}
