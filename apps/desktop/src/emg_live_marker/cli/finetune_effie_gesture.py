@@ -84,9 +84,24 @@ def collect_effie_records(dataset_root: Path) -> list[EffieWindowRecord]:
     rest_trim = int(round(0.2 * SOURCE_FS))
     for session_dir in discover_session_dirs(dataset_root):
         session_id = session_dir.name
+        completed_trials: set[str] | None = None
+        metadata_path = session_dir / "metadata.json"
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            metadata = {}
+        trial_statuses = metadata.get("trial_statuses") if isinstance(metadata, dict) else None
+        if isinstance(trial_statuses, dict):
+            completed_trials = {
+                str(trial_id)
+                for trial_id, status in trial_statuses.items()
+                if status == "completed"
+            }
         sample_index, _software_time, emg = load_emg(session_dir / "emg.csv", signal_type="raw")
         grouped = event_groups(read_csv_dicts(session_dir / "events.csv"))
         for trial_id, phases in sorted(grouped.items()):
+            if completed_trials is not None and trial_id not in completed_trials:
+                continue
             required = {"trial_start", "gesture_start", "gesture_end", "trial_end"}
             if not required <= set(phases):
                 continue

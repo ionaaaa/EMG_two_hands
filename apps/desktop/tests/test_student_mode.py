@@ -66,7 +66,7 @@ def test_student_window_contains_all_course_entries(app) -> None:
             "采集我的手势",
             "查看信号与识别结果",
             "设置游戏指令",
-            "训练和优化我的模型",
+            "训练我的模型",
             "进入挑战赛",
         ]
         assert len(window.course_entry_buttons) == 8
@@ -75,13 +75,12 @@ def test_student_window_contains_all_course_entries(app) -> None:
         window.close()
 
 
-def test_future_course_entries_are_disabled_and_clearly_marked(app) -> None:
+def test_personal_training_course_is_enabled(app) -> None:
     window = StudentMainWindow(paths=resolve_project_paths())
     try:
-        for index in (6,):
-            button = window.course_entry_buttons[index]
-            assert button.isEnabled() is False
-            assert "后续课程开放" in button.text()
+        button = window.course_entry_buttons[6]
+        assert button.isEnabled() is True
+        assert button.text() == "训练我的模型"
         assert window.course_entry_buttons[5].isEnabled() is True
     finally:
         window.close()

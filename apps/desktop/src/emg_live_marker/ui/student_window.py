@@ -33,6 +33,7 @@ from emg_live_marker.realtime.collection import CollectionController, Collection
 from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
 from emg_live_marker.realtime.student_observation import StudentObservationService
+from emg_live_marker.realtime.student_personal_training import StudentPersonalTrainingService
 from emg_live_marker.ui.student_pages import (
     COURSE_ENTRIES,
     CourseEntry,
@@ -40,6 +41,7 @@ from emg_live_marker.ui.student_pages import (
     StudentCollectionPage,
     StudentGameMappingPage,
     StudentQuickExperiencePage,
+    StudentPersonalTrainingPage,
     StudentSignalObservationPage,
     create_collection_gate_page,
     create_course_page,
@@ -94,6 +96,7 @@ class StudentMainWindow(QMainWindow):
         device_check_service: DeviceCheckService | None = None,
         game_mapping_service: GameMappingService | None = None,
         game_experience_service: StudentGameExperienceService | None = None,
+        personal_training_service: StudentPersonalTrainingService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -132,6 +135,16 @@ class StudentMainWindow(QMainWindow):
             self.paths.project_root / "apps" / "web-game",
             mapping_service=self.game_mapping_service,
             parent=self,
+        )
+        self.personal_training_service = (
+            personal_training_service
+            or StudentPersonalTrainingService(
+                self.paths.project_root,
+                self.paths.dataset_root,
+                self.course_config,
+                self.observation_service,
+                parent=self,
+            )
         )
         self.device_check_service.emg_packets_received.connect(self._on_device_emg_packets)
 
@@ -186,6 +199,14 @@ class StudentMainWindow(QMainWindow):
                 )
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
                     self.game_mapping_page
+                )
+            elif entry.identifier == "train-model":
+                self.personal_training_page = StudentPersonalTrainingPage(
+                    self.personal_training_service,
+                    self.show_home,
+                )
+                self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
+                    self.personal_training_page
                 )
             else:
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
@@ -261,6 +282,8 @@ class StudentMainWindow(QMainWindow):
             )
         if entry.identifier == "configure-game":
             self.game_mapping_page.activate()
+        if entry.identifier == "train-model":
+            self.personal_training_page.activate()
         self._stack.setCurrentIndex(self._entry_page_indexes[entry.identifier])
 
     def _current_anonymous_group_id(self) -> str:
@@ -397,5 +420,6 @@ class StudentMainWindow(QMainWindow):
             self.collection_controller.end("interrupted")
         self.signal_observation_page.stop()
         self.game_experience_service.stop()
+        self.personal_training_service.close()
         self.device_check_service.close()
         super().closeEvent(event)

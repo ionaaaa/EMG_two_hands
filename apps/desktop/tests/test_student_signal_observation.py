@@ -113,6 +113,37 @@ def test_missing_model_keeps_waveforms_and_never_starts_demo_decoder(tmp_path) -
         service.stop()
 
 
+def test_standard_and_personal_models_switch_on_the_shared_realtime_service(tmp_path) -> None:
+    standard_path = tmp_path / "standard.pt"
+    personal_path = tmp_path / "personal.pt"
+    standard_path.touch()
+    personal_path.touch()
+    standard = Predictor()
+    personal = Predictor()
+    loaded = []
+
+    def loader(path):
+        loaded.append(Path(path))
+        return standard
+
+    service = StudentObservationService(
+        tmp_path, observation_config(standard_path), model_loader=loader
+    )
+    service.start(left_ready=True, right_ready=False)
+    first_decoder = service.decoder_for("left")
+    try:
+        assert service.activate_personal_model(personal_path, personal)
+        personal_decoder = service.decoder_for("left")
+        assert personal_decoder is not first_decoder
+        assert personal_decoder.predictor is personal
+        assert service.active_model_path == personal_path.resolve()
+        assert service.use_standard_model()
+        assert service.decoder_for("left").predictor is standard
+        assert loaded == [standard_path]
+    finally:
+        service.stop()
+
+
 def test_page_exposes_only_three_student_modes_and_chinese_results(app, tmp_path) -> None:
     service = StudentObservationService(
         tmp_path,

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QProgressBar,
     QRadioButton,
     QVBoxLayout,
     QWidget,
@@ -27,6 +28,13 @@ from emg_live_marker.realtime.student_observation import (
     StudentObservationService,
 )
 from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
+from emg_live_marker.realtime.student_personal_training import (
+    GAME_GESTURES,
+    GESTURE_NAMES_ZH as TRAINING_GESTURE_NAMES_ZH,
+    PersonalTrainingSnapshot,
+    StudentPersonalTrainingService,
+    StudentTrainingSession,
+)
 from emg_live_marker.ui.waveform_view import MultiChannelWaveformView
 
 
@@ -57,9 +65,8 @@ COURSE_ENTRIES: tuple[CourseEntry, ...] = (
     ),
     CourseEntry(
         "train-model",
-        "训练和优化我的模型",
-        "模型训练与优化将在后续课程中开放。",
-        available=False,
+        "训练我的模型",
+        "使用本组已完成的采集数据训练个人手势模型。",
     ),
     CourseEntry("challenge", "进入挑战赛", "进入课程挑战赛页面。"),
 )
@@ -449,6 +456,184 @@ class StudentGameMappingPage(QWidget):
         self.message_label.setText(message)
         if saved:
             self.group_label.setText(f"匿名小组：{self.service.current_group_id}")
+
+
+class StudentPersonalTrainingPage(QWidget):
+    """One-click personal training from automatically discovered group sessions."""
+
+    def __init__(
+        self,
+        service: StudentPersonalTrainingService,
+        go_home: Callable[[], None],
+    ) -> None:
+        super().__init__()
+        self.setObjectName("student-personal-training-page")
+        self.service = service
+        self._sessions: tuple[StudentTrainingSession, ...] = ()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(48, 32, 48, 32)
+        layout.setSpacing(14)
+
+        title = QLabel("一键训练个人模型")
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        title.setStyleSheet("font-size: 28px; font-weight: 700;")
+        layout.addWidget(title)
+        hint = QLabel("选择本组已经完成的采集记录，系统会自动检查数据并安全训练；标准模型不会被修改。")
+        hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        selectors = QGridLayout()
+        selectors.addWidget(QLabel("匿名小组"), 0, 0)
+        self.group_combo = QComboBox()
+        self.group_combo.setObjectName("personal-training-group")
+        selectors.addWidget(self.group_combo, 0, 1)
+        selectors.addWidget(QLabel("采集记录"), 1, 0)
+        self.session_combo = QComboBox()
+        self.session_combo.setObjectName("personal-training-session")
+        selectors.addWidget(self.session_combo, 1, 1)
+        layout.addLayout(selectors)
+
+        self.count_labels: dict[str, QLabel] = {}
+        counts = QHBoxLayout()
+        for gesture in ("fist", "finger_spread", "thumb_index_pinch"):
+            label = QLabel(f"{TRAINING_GESTURE_NAMES_ZH[gesture]}：0 次")
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.count_labels[gesture] = label
+            counts.addWidget(label)
+        layout.addLayout(counts)
+
+        self.status_label = QLabel("请选择已有采集数据。")
+        self.status_label.setObjectName("personal-training-status")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+        self.progress = QProgressBar()
+        self.progress.setObjectName("personal-training-progress")
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        layout.addWidget(self.progress)
+        self.accuracy_label = QLabel("验证准确率：训练完成后显示")
+        self.accuracy_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.accuracy_label)
+        self.performance_labels: dict[str, QLabel] = {}
+        performance = QHBoxLayout()
+        for gesture in GAME_GESTURES:
+            label = QLabel(f"{TRAINING_GESTURE_NAMES_ZH[gesture]}：—")
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.performance_labels[gesture] = label
+            performance.addWidget(label)
+        layout.addLayout(performance)
+        self.model_label = QLabel("当前识别模型：标准模型")
+        self.model_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.model_label)
+        layout.addStretch(1)
+
+        buttons = QGridLayout()
+        self.train_button = QPushButton("训练我的模型")
+        self.retrain_button = QPushButton("重新训练")
+        self.cancel_button = QPushButton("取消训练")
+        self.standard_button = QPushButton("使用标准模型")
+        self.personal_button = QPushButton("使用我的模型")
+        self.home_button = QPushButton("返回首页")
+        for button in (
+            self.train_button,
+            self.retrain_button,
+            self.cancel_button,
+            self.standard_button,
+            self.personal_button,
+            self.home_button,
+        ):
+            button.setMinimumHeight(42)
+        self.train_button.clicked.connect(self._start_training)
+        self.retrain_button.clicked.connect(self._start_training)
+        self.cancel_button.clicked.connect(self.service.cancel_training)
+        self.standard_button.clicked.connect(self.service.use_standard_model)
+        self.personal_button.clicked.connect(self.service.use_personal_model)
+        self.home_button.clicked.connect(go_home)
+        buttons.addWidget(self.train_button, 0, 0)
+        buttons.addWidget(self.retrain_button, 0, 1)
+        buttons.addWidget(self.cancel_button, 0, 2)
+        buttons.addWidget(self.standard_button, 1, 0)
+        buttons.addWidget(self.personal_button, 1, 1)
+        buttons.addWidget(self.home_button, 1, 2)
+        layout.addLayout(buttons)
+
+        self.group_combo.currentTextChanged.connect(self._populate_sessions)
+        self.session_combo.currentIndexChanged.connect(self._show_selected_session)
+        self.service.state_changed.connect(self.set_snapshot)
+        self.service.observation_service.model_source_changed.connect(self._on_model_source_changed)
+        self.set_snapshot(self.service.snapshot)
+
+    def activate(self) -> None:
+        self._sessions = self.service.discover_sessions()
+        current_group = self.group_combo.currentText()
+        groups = list(dict.fromkeys(session.group_id for session in self._sessions))
+        self.group_combo.blockSignals(True)
+        self.group_combo.clear()
+        self.group_combo.addItems(groups)
+        if current_group in groups:
+            self.group_combo.setCurrentText(current_group)
+        self.group_combo.blockSignals(False)
+        self._populate_sessions(self.group_combo.currentText())
+        if not self._sessions:
+            self.status_label.setText("未找到采集数据，请先完成手势采集。")
+
+    def _populate_sessions(self, group_id: str) -> None:
+        selected = [session for session in self._sessions if session.group_id == group_id]
+        self.session_combo.blockSignals(True)
+        self.session_combo.clear()
+        for session in selected:
+            self.session_combo.addItem(session.session_id, session)
+        self.session_combo.blockSignals(False)
+        self._show_selected_session()
+
+    def _selected_session(self) -> StudentTrainingSession | None:
+        value = self.session_combo.currentData()
+        return value if isinstance(value, StudentTrainingSession) else None
+
+    def _show_selected_session(self, _index: int = -1) -> None:
+        session = self._selected_session()
+        values = session.counts if session is not None else {}
+        for gesture, label in self.count_labels.items():
+            label.setText(f"{TRAINING_GESTURE_NAMES_ZH[gesture]}：{values.get(gesture, 0)} 次")
+        if not self.service.running:
+            self.status_label.setText(session.message if session else "未找到可用的采集记录。")
+            self.train_button.setEnabled(bool(session and session.ready))
+
+    def _start_training(self) -> None:
+        session = self._selected_session()
+        if session is None:
+            self.status_label.setText("请先选择有效的采集记录。")
+            return
+        self.service.start_training(session)
+
+    def set_snapshot(self, snapshot: PersonalTrainingSnapshot) -> None:
+        self.status_label.setText(snapshot.message)
+        self.progress.setValue(snapshot.progress_percent)
+        if snapshot.validation_accuracy is not None:
+            self.accuracy_label.setText(f"验证准确率：{snapshot.validation_accuracy:.1%}")
+        if snapshot.per_class_performance is not None:
+            for gesture, value in snapshot.per_class_performance.items():
+                text = "—" if value is None else f"{value:.1%}"
+                self.performance_labels[gesture].setText(
+                    f"{TRAINING_GESTURE_NAMES_ZH[gesture]}：{text}"
+                )
+        running = snapshot.state in {"running", "cancelling"}
+        self.group_combo.setEnabled(not running)
+        self.session_combo.setEnabled(not running)
+        selected = self._selected_session()
+        self.train_button.setEnabled(not running and bool(selected and selected.ready))
+        self.retrain_button.setEnabled(not running and self.service.last_valid_model_dir is not None)
+        self.cancel_button.setEnabled(snapshot.state == "running")
+        self.personal_button.setEnabled(not running and self.service.observation_service.personal_model_available)
+        self.standard_button.setEnabled(not running)
+        self._on_model_source_changed(snapshot.model_source, "")
+
+    def _on_model_source_changed(self, source: str, _display: str) -> None:
+        self.model_label.setText(
+            "当前识别模型：我的模型" if source == "personal" else "当前识别模型：标准模型"
+        )
 
 
 class StudentSignalObservationPage(QWidget):

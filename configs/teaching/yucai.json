@@ -33,6 +33,19 @@
     "smoothing_frames": 5,
     "change_confirmations": 2
   },
+  "personal_training": {
+    "minimum_completed_trials_per_gesture": 5,
+    "mode": "freeze_backbone",
+    "epochs": 50,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "device": "auto",
+    "validation_split": "trial",
+    "max_rest_ratio": 1.0,
+    "seed": 42,
+    "export_torchscript": false,
+    "output_directory": "apps/desktop/models/student_personal"
+  },
   "game": {
     "commands": {
       "A": {
@@ -107,6 +120,7 @@
       "realtime_decoding.confidence_threshold",
       "realtime_decoding.smoothing_frames",
       "realtime_decoding.change_confirmations",
+      "personal_training",
       "game.gestures",
       "game.commands",
       "game.default_mapping",

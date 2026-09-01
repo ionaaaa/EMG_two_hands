@@ -64,6 +64,7 @@ class StudentObservationService(QObject):
 
     gesture_updated = Signal(str, str, float, dict)
     model_status_changed = Signal(str)
+    model_source_changed = Signal(str, str)
 
     def __init__(
         self,
@@ -77,6 +78,10 @@ class StudentObservationService(QObject):
         self.settings = StudentDecoderSettings.from_config(project_root, course_config)
         self._model_loader = model_loader or load_model
         self._predictor: Any | None = None
+        self._standard_predictor: Any | None = None
+        self._personal_predictor: Any | None = None
+        self._personal_model_path: Path | None = None
+        self.model_source = "standard"
         self._inference_lock = Lock()
         self._model_load_attempted = False
         self.model_error = ""
@@ -95,6 +100,16 @@ class StudentObservationService(QObject):
     @property
     def predictor(self) -> Any | None:
         return self._predictor
+
+    @property
+    def personal_model_available(self) -> bool:
+        return self._personal_predictor is not None and self._personal_model_path is not None
+
+    @property
+    def active_model_path(self) -> Path:
+        if self.model_source == "personal" and self._personal_model_path is not None:
+            return self._personal_model_path
+        return self.settings.model_path
 
     def on_emg_packets(self, side: str, packets: list[object]) -> None:
         """Append packets supplied by ``DeviceCheckService.emg_packets_received``."""
@@ -162,8 +177,44 @@ class StudentObservationService(QObject):
             raise ValueError(f"unsupported student display mode: {mode}")
         return getattr(self._runtime[side], mode).get_window(seconds)
 
+    def activate_personal_model(self, path: str | Path, predictor: Any | None = None) -> bool:
+        model_path = Path(path)
+        if model_path.is_dir():
+            model_path = model_path / "gesture_classifier.pt"
+        try:
+            loaded = predictor if predictor is not None else self._model_loader(model_path)
+        except Exception:  # noqa: BLE001 - callers receive a student-safe failure.
+            self.model_status_changed.emit("个人模型加载失败，继续使用训练前模型。")
+            return False
+        self._personal_predictor = loaded
+        self._personal_model_path = model_path.resolve()
+        self._switch_predictor("personal", loaded)
+        return True
+
+    def use_standard_model(self) -> bool:
+        if not self._ensure_standard_predictor():
+            self.model_status_changed.emit(self.model_error)
+            return False
+        self._switch_predictor("standard", self._standard_predictor)
+        return True
+
+    def use_personal_model(self) -> bool:
+        if not self.personal_model_available:
+            self.model_status_changed.emit("尚无有效的个人模型，请先完成训练。")
+            return False
+        self._switch_predictor("personal", self._personal_predictor)
+        return True
+
     def _ensure_predictor(self) -> bool:
-        if self._predictor is not None:
+        if self.model_source == "personal" and self._personal_predictor is not None:
+            self._predictor = self._personal_predictor
+            return True
+        return self._ensure_standard_predictor()
+
+    def _ensure_standard_predictor(self) -> bool:
+        if self._standard_predictor is not None:
+            if self.model_source == "standard":
+                self._predictor = self._standard_predictor
             return True
         if self._model_load_attempted:
             return False
@@ -172,12 +223,34 @@ class StudentObservationService(QObject):
             self.model_error = "标准识别模型缺失，波形仍可正常观察，请联系老师。"
             return False
         try:
-            self._predictor = self._model_loader(self.settings.model_path)
+            self._standard_predictor = self._model_loader(self.settings.model_path)
         except Exception:  # noqa: BLE001 - model backends provide heterogeneous errors.
             self.model_error = "标准识别模型加载失败，波形仍可正常观察，请联系老师。"
             return False
+        if self.model_source == "standard":
+            self._predictor = self._standard_predictor
         self.model_error = ""
         return True
+
+    def _switch_predictor(self, source: str, predictor: Any) -> None:
+        if predictor is None:
+            return
+        was_active = self.active
+        if was_active:
+            for runtime in self._runtime.values():
+                decoder = runtime.decoder
+                runtime.decoder = None
+                if decoder is not None:
+                    decoder.close(wait=True)
+        self.model_source = source
+        self._predictor = predictor
+        if was_active:
+            for side, ready in self.ready_sides.items():
+                if ready:
+                    self._start_decoder(side)
+        display = "我的模型" if source == "personal" else "标准模型"
+        self.model_status_changed.emit("")
+        self.model_source_changed.emit(source, display)
 
     def _start_decoder(self, side: str) -> None:
         runtime = self._runtime[side]
