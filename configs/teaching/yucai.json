@@ -46,6 +46,38 @@
     "export_torchscript": false,
     "output_directory": "apps/desktop/models/student_personal"
   },
+  "student_control_profiles": {
+    "sensitivity": {
+      "low": {
+        "confidence_threshold": 0.8
+      },
+      "standard": {
+        "confidence_threshold": 0.7
+      },
+      "high": {
+        "confidence_threshold": 0.6
+      }
+    },
+    "control_style": {
+      "fast": {
+        "smoothing_frames": 3,
+        "change_confirmations": 1
+      },
+      "balanced": {
+        "smoothing_frames": 5,
+        "change_confirmations": 2
+      },
+      "stable": {
+        "smoothing_frames": 7,
+        "change_confirmations": 3
+      }
+    },
+    "default": {
+      "sensitivity": "standard",
+      "control_style": "balanced"
+    },
+    "test_phase_duration_ms": 3000
+  },
   "game": {
     "commands": {
       "A": {
@@ -121,6 +153,7 @@
       "realtime_decoding.smoothing_frames",
       "realtime_decoding.change_confirmations",
       "personal_training",
+      "student_control_profiles",
       "game.gestures",
       "game.commands",
       "game.default_mapping",

@@ -28,6 +28,10 @@ from emg_live_marker.realtime.student_observation import (
     StudentObservationService,
 )
 from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
+from emg_live_marker.realtime.student_control_optimization import (
+    ControlTestResult,
+    StudentControlEffectTestService,
+)
 from emg_live_marker.realtime.student_personal_training import (
     GAME_GESTURES,
     GESTURE_NAMES_ZH as TRAINING_GESTURE_NAMES_ZH,
@@ -465,14 +469,21 @@ class StudentPersonalTrainingPage(QWidget):
         self,
         service: StudentPersonalTrainingService,
         go_home: Callable[[], None],
+        *,
+        mapping_service: GameMappingService | None = None,
+        control_test_service: StudentControlEffectTestService | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName("student-personal-training-page")
         self.service = service
+        self.mapping_service = mapping_service or GameMappingService(service.course_config, parent=self)
+        self.control_test_service = control_test_service or StudentControlEffectTestService(
+            service.observation_service, parent=self
+        )
         self._sessions: tuple[StudentTrainingSession, ...] = ()
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(48, 32, 48, 32)
-        layout.setSpacing(14)
+        layout.setContentsMargins(32, 18, 32, 18)
+        layout.setSpacing(8)
 
         title = QLabel("一键训练个人模型")
         title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -527,6 +538,38 @@ class StudentPersonalTrainingPage(QWidget):
         self.model_label = QLabel("当前识别模型：标准模型")
         self.model_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.model_label)
+
+        control_title = QLabel("控制优化")
+        control_title.setStyleSheet("font-size: 20px; font-weight: 700;")
+        layout.addWidget(control_title)
+        control_grid = QGridLayout()
+        control_grid.addWidget(QLabel("识别灵敏度"), 0, 0)
+        self.sensitivity_combo = QComboBox()
+        self.sensitivity_combo.setObjectName("student-sensitivity")
+        self.sensitivity_combo.addItem("低", "low")
+        self.sensitivity_combo.addItem("标准", "standard")
+        self.sensitivity_combo.addItem("高", "high")
+        control_grid.addWidget(self.sensitivity_combo, 0, 1)
+        control_grid.addWidget(QLabel("控制风格"), 1, 0)
+        self.control_style_combo = QComboBox()
+        self.control_style_combo.setObjectName("student-control-style")
+        self.control_style_combo.addItem("响应快", "fast")
+        self.control_style_combo.addItem("均衡", "balanced")
+        self.control_style_combo.addItem("更稳定", "stable")
+        control_grid.addWidget(self.control_style_combo, 1, 1)
+        self.save_control_button = QPushButton("保存本组控制设置")
+        self.control_test_button = QPushButton("开始控制效果测试")
+        control_grid.addWidget(self.save_control_button, 0, 2)
+        control_grid.addWidget(self.control_test_button, 1, 2)
+        layout.addLayout(control_grid)
+        self.test_prompt_label = QLabel("测试提示：放松 → 握拳 → 放松 → 伸掌")
+        self.test_prompt_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.test_prompt_label.setStyleSheet("font-size: 17px; font-weight: 600;")
+        layout.addWidget(self.test_prompt_label)
+        self.test_result_label = QLabel("误触发次数：暂无结果　平均响应时间：暂无结果　错误切换次数：暂无结果　稳定性：暂无结果")
+        self.test_result_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.test_result_label.setWordWrap(True)
+        layout.addWidget(self.test_result_label)
         layout.addStretch(1)
 
         buttons = QGridLayout()
@@ -551,6 +594,10 @@ class StudentPersonalTrainingPage(QWidget):
         self.standard_button.clicked.connect(self.service.use_standard_model)
         self.personal_button.clicked.connect(self.service.use_personal_model)
         self.home_button.clicked.connect(go_home)
+        self.sensitivity_combo.currentIndexChanged.connect(self._apply_control_profile)
+        self.control_style_combo.currentIndexChanged.connect(self._apply_control_profile)
+        self.save_control_button.clicked.connect(self._save_control_profile)
+        self.control_test_button.clicked.connect(self._start_control_test)
         buttons.addWidget(self.train_button, 0, 0)
         buttons.addWidget(self.retrain_button, 0, 1)
         buttons.addWidget(self.cancel_button, 0, 2)
@@ -563,6 +610,14 @@ class StudentPersonalTrainingPage(QWidget):
         self.session_combo.currentIndexChanged.connect(self._show_selected_session)
         self.service.state_changed.connect(self.set_snapshot)
         self.service.observation_service.model_source_changed.connect(self._on_model_source_changed)
+        self.control_test_service.phase_changed.connect(self._on_test_phase)
+        self.control_test_service.state_changed.connect(self._on_test_state)
+        self.control_test_service.result_changed.connect(self._show_test_result)
+        self._sync_control_combos()
+        initial_preferences = self.mapping_service.control_preferences
+        self.service.observation_service.apply_control_profile(
+            initial_preferences["sensitivity"], initial_preferences["control_style"]
+        )
         self.set_snapshot(self.service.snapshot)
 
     def activate(self) -> None:
@@ -580,6 +635,13 @@ class StudentPersonalTrainingPage(QWidget):
             self.status_label.setText("未找到采集数据，请先完成手势采集。")
 
     def _populate_sessions(self, group_id: str) -> None:
+        if group_id:
+            self.mapping_service.load_group(group_id)
+            self._sync_control_combos()
+            preferences = self.mapping_service.control_preferences
+            self.service.observation_service.apply_control_profile(
+                preferences["sensitivity"], preferences["control_style"]
+            )
         selected = [session for session in self._sessions if session.group_id == group_id]
         self.session_combo.blockSignals(True)
         self.session_combo.clear()
@@ -633,6 +695,63 @@ class StudentPersonalTrainingPage(QWidget):
     def _on_model_source_changed(self, source: str, _display: str) -> None:
         self.model_label.setText(
             "当前识别模型：我的模型" if source == "personal" else "当前识别模型：标准模型"
+        )
+
+    def _sync_control_combos(self) -> None:
+        preferences = self.mapping_service.control_preferences
+        self.sensitivity_combo.blockSignals(True)
+        self.control_style_combo.blockSignals(True)
+        self.sensitivity_combo.setCurrentIndex(
+            self.sensitivity_combo.findData(preferences["sensitivity"])
+        )
+        self.control_style_combo.setCurrentIndex(
+            self.control_style_combo.findData(preferences["control_style"])
+        )
+        self.sensitivity_combo.blockSignals(False)
+        self.control_style_combo.blockSignals(False)
+
+    def _apply_control_profile(self, _index: int = -1) -> None:
+        sensitivity = self.sensitivity_combo.currentData()
+        style = self.control_style_combo.currentData()
+        if not sensitivity or not style:
+            return
+        if self.mapping_service.set_control_preferences(str(sensitivity), str(style)):
+            self.service.observation_service.apply_control_profile(str(sensitivity), str(style))
+            self.status_label.setText("控制设置已实时生效；保存后可供本组下次恢复。")
+
+    def _save_control_profile(self) -> None:
+        group_id = self.group_combo.currentText().strip()
+        saved, message = self.mapping_service.save_current_group(group_id)
+        self.status_label.setText(message)
+        if not saved:
+            return
+
+    def _start_control_test(self) -> None:
+        self.control_test_service.start()
+
+    def _on_test_phase(self, index: int, _target: str, display: str) -> None:
+        self.test_prompt_label.setText(f"第 {index} / 4 阶段：请{display}")
+
+    def _on_test_state(self, state: str, message: str) -> None:
+        self.status_label.setText(message)
+        self.control_test_button.setEnabled(state != "running")
+        self.sensitivity_combo.setEnabled(state != "running")
+        self.control_style_combo.setEnabled(state != "running")
+
+    def _show_test_result(self, result: ControlTestResult) -> None:
+        if not result.has_data:
+            self.test_result_label.setText(
+                "误触发次数：暂无结果　平均响应时间：暂无结果　错误切换次数：暂无结果　稳定性：暂无结果"
+            )
+            return
+        response = (
+            "暂无结果"
+            if result.average_response_seconds is None
+            else f"{result.average_response_seconds:.2f} 秒"
+        )
+        self.test_result_label.setText(
+            f"误触发次数：{result.false_triggers}　平均响应时间：{response}　"
+            f"错误切换次数：{result.wrong_switches}　稳定性：{result.stability_level}"
         )
 
 

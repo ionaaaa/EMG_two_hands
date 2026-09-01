@@ -12,6 +12,8 @@ from PySide6.QtCore import QObject, QStandardPaths, Signal
 GESTURES = ("rest", "fist", "open-palm", "pinch")
 EDITABLE_GESTURES = ("fist", "open-palm")
 COMMANDS = ("A", "B", "none")
+SENSITIVITIES = ("low", "standard", "high")
+CONTROL_STYLES = ("fast", "balanced", "stable")
 
 
 class GameMappingConfigError(ValueError):
@@ -23,6 +25,7 @@ class GameMappingService(QObject):
 
     mapping_changed = Signal(dict)
     test_feedback = Signal(dict)
+    control_preferences_changed = Signal(str, str)
 
     def __init__(
         self,
@@ -38,6 +41,12 @@ class GameMappingService(QObject):
         self._commands = self._validate_commands(game.get("commands"))
         self._default_mapping = self._validate_mapping(game.get("default_mapping"))
         self._mapping = dict(self._default_mapping)
+        profile_config = course_config.get("student_control_profiles", {})
+        defaults = profile_config.get("default", {}) if isinstance(profile_config, dict) else {}
+        self._default_control_preferences = self._validate_control_preferences(
+            defaults, fallback={"sensitivity": "standard", "control_style": "balanced"}
+        )
+        self._control_preferences = dict(self._default_control_preferences)
         self.current_group_id = ""
         default_root = Path(
             QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
@@ -56,6 +65,25 @@ class GameMappingService(QObject):
     @property
     def resolved_mapping(self) -> dict[str, str]:
         return dict(self._mapping)
+
+    @property
+    def control_preferences(self) -> dict[str, str]:
+        return dict(self._control_preferences)
+
+    def set_control_preferences(self, sensitivity: str, control_style: str) -> bool:
+        try:
+            validated = self._validate_control_preferences(
+                {"sensitivity": sensitivity, "control_style": control_style}
+            )
+        except GameMappingConfigError:
+            return False
+        if validated == self._control_preferences:
+            return True
+        self._control_preferences = validated
+        self.control_preferences_changed.emit(
+            validated["sensitivity"], validated["control_style"]
+        )
+        return True
 
     def set_editable_mapping(self, fist_command: str, open_palm_command: str) -> None:
         candidate = dict(self._mapping)
@@ -77,6 +105,7 @@ class GameMappingService(QObject):
             "schema_version": 1,
             "anonymous_group_id": normalized,
             "mapping": self.resolved_mapping,
+            "control_profile": self.control_preferences,
         }
         try:
             self.storage_root.mkdir(parents=True, exist_ok=True)
@@ -88,7 +117,7 @@ class GameMappingService(QObject):
         except OSError:
             return False, "本组设置保存失败，请稍后重试。"
         self.current_group_id = normalized
-        return True, f"已保存匿名小组 {normalized} 的游戏指令设置。"
+        return True, f"已保存匿名小组 {normalized} 的课程设置。"
 
     def load_group(self, group_id: str) -> tuple[bool, str]:
         normalized = self._valid_group_id(group_id)
@@ -98,13 +127,17 @@ class GameMappingService(QObject):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             mapping = self._validate_mapping(payload.get("mapping"))
+            preferences = self._validate_control_preferences(
+                payload.get("control_profile"), fallback=self._default_control_preferences
+            )
         except FileNotFoundError:
             return False, "未找到该匿名小组已保存的设置，将使用当前设置。"
         except (OSError, json.JSONDecodeError, AttributeError, GameMappingConfigError):
             return False, "该匿名小组的设置文件无效，将使用当前设置。"
         self.current_group_id = normalized
         self._apply_mapping(mapping)
-        return True, f"已加载匿名小组 {normalized} 的游戏指令设置。"
+        self._apply_control_preferences(preferences)
+        return True, f"已加载匿名小组 {normalized} 的课程设置。"
 
     def test_mapping(self) -> str:
         fist = self._commands[self._mapping["fist"]]["display_name_zh"]
@@ -126,6 +159,7 @@ class GameMappingService(QObject):
             "commands": self.commands,
             "default_mapping": self.default_mapping,
             "resolved_mapping": self.resolved_mapping,
+            "control_profile": self.control_preferences,
             "anonymous_group_id": self.current_group_id,
         }
 
@@ -150,9 +184,20 @@ class GameMappingService(QObject):
         try:
             saved = json.loads(group_path.read_text(encoding="utf-8"))
             self._mapping = self._validate_mapping(saved.get("mapping"))
+            self._control_preferences = self._validate_control_preferences(
+                saved.get("control_profile"), fallback=self._default_control_preferences
+            )
         except (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError, GameMappingConfigError):
             return
         self.current_group_id = normalized
+
+    def _apply_control_preferences(self, preferences: dict[str, str]) -> None:
+        if preferences == self._control_preferences:
+            return
+        self._control_preferences = dict(preferences)
+        self.control_preferences_changed.emit(
+            preferences["sensitivity"], preferences["control_style"]
+        )
 
     def _group_path(self, group_id: str) -> Path:
         return self.storage_root / f"{group_id}.json"
@@ -206,3 +251,18 @@ class GameMappingService(QObject):
             raise GameMappingConfigError("握拳和伸掌必须一一对应指令 A/B")
         return mapping
 
+    @staticmethod
+    def _validate_control_preferences(
+        value: object, *, fallback: dict[str, str] | None = None
+    ) -> dict[str, str]:
+        if not isinstance(value, dict):
+            if fallback is not None:
+                return dict(fallback)
+            raise GameMappingConfigError("学生控制设置无效")
+        sensitivity = str(value.get("sensitivity", ""))
+        control_style = str(value.get("control_style", ""))
+        if sensitivity not in SENSITIVITIES or control_style not in CONTROL_STYLES:
+            if fallback is not None:
+                return dict(fallback)
+            raise GameMappingConfigError("学生控制设置必须使用课程预设")
+        return {"sensitivity": sensitivity, "control_style": control_style}

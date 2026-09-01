@@ -16,11 +16,14 @@ from emg_live_marker.realtime.student_personal_training import (
     REQUIRED_ARTIFACTS,
     StudentPersonalTrainingService,
 )
+from emg_live_marker.realtime.game_mapping import GameMappingService
+from emg_live_marker.realtime.student_control_optimization import StudentControlEffectTestService
 from emg_live_marker.ui.student_pages import COURSE_ENTRIES, StudentPersonalTrainingPage
 
 
 class FakeObservation(QObject):
     model_source_changed = Signal(str, str)
+    gesture_updated = Signal(str, str, float, dict)
 
     def __init__(self, standard_path: Path) -> None:
         super().__init__()
@@ -28,6 +31,20 @@ class FakeObservation(QObject):
         self.model_source = "standard"
         self.personal_model_available = False
         self.personal_path = None
+        self.ready_sides = {"left": False, "right": False}
+        self.active = False
+        self.control_profile = {"sensitivity": "standard", "control_style": "balanced"}
+
+    def apply_control_profile(self, sensitivity, control_style):
+        self.control_profile = {
+            "sensitivity": sensitivity,
+            "control_style": control_style,
+        }
+        return True
+
+    def start(self, *, left_ready, right_ready):
+        self.ready_sides = {"left": left_ready, "right": right_ready}
+        self.active = True
 
     def activate_personal_model(self, path, predictor=None) -> bool:
         self.personal_path = Path(path)
@@ -273,7 +290,16 @@ def test_missing_artifact_or_failed_process_keeps_previous_model(tmp_path) -> No
 
 def test_training_page_has_no_technical_controls(app, tmp_path) -> None:
     service, _observation, _processes, _session, _standard = make_service(tmp_path)
-    page = StudentPersonalTrainingPage(service, lambda: None)
+    config_path = Path(__file__).parents[3] / "configs" / "teaching" / "yucai.json"
+    course_config = json.loads(config_path.read_text(encoding="utf-8"))
+    mapping = GameMappingService(course_config, storage_root=tmp_path / "settings")
+    control_test = StudentControlEffectTestService(service.observation_service)
+    page = StudentPersonalTrainingPage(
+        service,
+        lambda: None,
+        mapping_service=mapping,
+        control_test_service=control_test,
+    )
     page.activate()
     assert page.group_combo.currentText() == "group_01"
     assert page.train_button.isEnabled()
@@ -281,6 +307,27 @@ def test_training_page_has_no_technical_controls(app, tmp_path) -> None:
     visible_text = " ".join(button.text() for button in page.findChildren(type(page.train_button)))
     assert "学习率" not in visible_text
     assert "epoch" not in visible_text.lower()
+    assert [
+        page.sensitivity_combo.itemText(index)
+        for index in range(page.sensitivity_combo.count())
+    ] == ["低", "标准", "高"]
+    assert [
+        page.control_style_combo.itemText(index)
+        for index in range(page.control_style_combo.count())
+    ] == ["响应快", "均衡", "更稳定"]
+    student_text = visible_text + " " + " ".join(
+        page.sensitivity_combo.itemText(index)
+        for index in range(page.sensitivity_combo.count())
+    )
+    for forbidden in (
+        "confidence_threshold",
+        "smoothing_frames",
+        "change_confirmations",
+        "pinch_threshold",
+        "pinch_boost",
+        "pinch_margin",
+    ):
+        assert forbidden not in student_text
 
 
 def test_effie_collection_excludes_non_completed_trials_and_keeps_legacy(monkeypatch, tmp_path) -> None:

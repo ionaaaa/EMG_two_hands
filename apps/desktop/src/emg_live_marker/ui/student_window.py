@@ -33,6 +33,7 @@ from emg_live_marker.realtime.collection import CollectionController, Collection
 from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
 from emg_live_marker.realtime.student_observation import StudentObservationService
+from emg_live_marker.realtime.student_control_optimization import StudentControlEffectTestService
 from emg_live_marker.realtime.student_personal_training import StudentPersonalTrainingService
 from emg_live_marker.ui.student_pages import (
     COURSE_ENTRIES,
@@ -129,6 +130,24 @@ class StudentMainWindow(QMainWindow):
             self.course_config,
             parent=self,
         )
+        preferences = self.game_mapping_service.control_preferences
+        self.observation_service.apply_control_profile(
+            preferences["sensitivity"], preferences["control_style"]
+        )
+        self.game_mapping_service.control_preferences_changed.connect(
+            self.observation_service.apply_control_profile
+        )
+        profile_config = self.course_config.get("student_control_profiles", {})
+        phase_duration_ms = (
+            profile_config.get("test_phase_duration_ms", 3000)
+            if isinstance(profile_config, dict)
+            else 3000
+        )
+        self.control_effect_test_service = StudentControlEffectTestService(
+            self.observation_service,
+            phase_duration_ms=int(phase_duration_ms),
+            parent=self,
+        )
         self.game_experience_service = game_experience_service or StudentGameExperienceService(
             self.device_check_service,
             self.observation_service,
@@ -204,6 +223,8 @@ class StudentMainWindow(QMainWindow):
                 self.personal_training_page = StudentPersonalTrainingPage(
                     self.personal_training_service,
                     self.show_home,
+                    mapping_service=self.game_mapping_service,
+                    control_test_service=self.control_effect_test_service,
                 )
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
                     self.personal_training_page
@@ -412,6 +433,7 @@ class StudentMainWindow(QMainWindow):
                 return
             self.collection_controller.end("partial")
         self.signal_observation_page.stop()
+        self.control_effect_test_service.stop()
         self.game_experience_service.stop()
         self._stack.setCurrentIndex(self._home_page_index)
 
@@ -419,6 +441,7 @@ class StudentMainWindow(QMainWindow):
         if self.collection_controller.active:
             self.collection_controller.end("interrupted")
         self.signal_observation_page.stop()
+        self.control_effect_test_service.stop()
         self.game_experience_service.stop()
         self.personal_training_service.close()
         self.device_check_service.close()

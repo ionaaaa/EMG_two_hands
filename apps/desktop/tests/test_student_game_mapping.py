@@ -97,7 +97,12 @@ def test_anonymous_group_save_load_and_restart_restore_without_git_writes(tmp_pa
     assert saved is True
     assert "group_01" in message
     payload = json.loads((tmp_path / "group_01.json").read_text(encoding="utf-8"))
-    assert set(payload) == {"schema_version", "anonymous_group_id", "mapping"}
+    assert set(payload) == {
+        "schema_version",
+        "anonymous_group_id",
+        "mapping",
+        "control_profile",
+    }
     assert payload["mapping"]["fist"] == "B"
 
     restarted = GameMappingService(mapping_config(), storage_root=tmp_path)
