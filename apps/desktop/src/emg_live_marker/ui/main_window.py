@@ -56,7 +56,12 @@ from emg_live_marker.realtime.gesture_server import GestureServer
 from emg_live_marker.realtime.recorder import SessionRecorder
 from emg_live_marker.realtime.ring_buffer import EmgRingBuffer, ImuRingBuffer
 from emg_live_marker.realtime.stream_processor import StreamingEMGProcessor
+from emg_live_marker.realtime.teacher_classroom import (
+    TeacherClassroomService,
+    load_teaching_course_config,
+)
 from emg_live_marker.ui.style import APP_QSS
+from emg_live_marker.ui.teacher_classroom import TeacherClassroomDock
 from emg_live_marker.ui.waveform_view import MultiChannelWaveformView
 
 NOTCH_OPTIONS: dict[str, tuple[float, ...]] = {
@@ -236,6 +241,19 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_central_widget()
         self._build_status_bar()
+        self._teacher_classroom_service = TeacherClassroomService(
+            self._paths,
+            load_teaching_course_config(self._paths.project_root),
+            parent=self,
+        )
+        self._teacher_classroom_service.runtime_reset_requested.connect(
+            self._prepare_next_student_group
+        )
+        self._classroom_dock = TeacherClassroomDock(
+            self._teacher_classroom_service,
+            self,
+        )
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._classroom_dock)
         self._gesture_server = GestureServer(host="127.0.0.1", port=8766)
         try:
             self._gesture_server.start()
@@ -288,6 +306,24 @@ class MainWindow(QMainWindow):
             self._stop_recording()
         self._disconnect_all()
         super().closeEvent(event)
+
+    def _prepare_next_student_group(self) -> None:
+        """Reset teacher-side volatile lesson state without deleting artifacts."""
+
+        if self._collection_active:
+            self._stop_collection()
+        else:
+            self._stop_recording()
+        self._enable_game_control_checkbox.setChecked(False)
+        self._dual_game_mapper.release_all()
+        self._subject_id_edit.clear()
+        self._session_id_edit.clear()
+        self._session_id_auto_generated = True
+        selected = self._teacher_classroom_service.configured_standard_model_path
+        if selected is not None and selected.is_file():
+            self._game_model_path_edit.setText(str(selected))
+            self._load_game_model()
+        self.statusBar().showMessage("已准备下一组学生；历史数据和成绩均已保留。", 5000)
 
     def _build_actions(self) -> None:
         self._port_combo = QComboBox()

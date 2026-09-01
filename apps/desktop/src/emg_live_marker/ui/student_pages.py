@@ -791,6 +791,11 @@ class StudentPersonalTrainingPage(QWidget):
             self.group_combo.setCurrentText(current_group)
         self.group_combo.blockSignals(False)
         self._populate_sessions(self.group_combo.currentText())
+        if not self.service.training_enabled:
+            self.status_label.setText("老师已关闭本课堂的个人模型训练。")
+            self.train_button.setEnabled(False)
+            self.retrain_button.setEnabled(False)
+            return
         if not self._sessions:
             self.status_label.setText("未找到采集数据，请先完成手势采集。")
 
@@ -819,7 +824,7 @@ class StudentPersonalTrainingPage(QWidget):
         values = session.counts if session is not None else {}
         for gesture, label in self.count_labels.items():
             label.setText(f"{TRAINING_GESTURE_NAMES_ZH[gesture]}：{values.get(gesture, 0)} 次")
-        if not self.service.running:
+        if not self.service.running and self.service.training_enabled:
             self.status_label.setText(session.message if session else "未找到可用的采集记录。")
             self.train_button.setEnabled(bool(session and session.ready))
 
@@ -845,8 +850,14 @@ class StudentPersonalTrainingPage(QWidget):
         self.group_combo.setEnabled(not running)
         self.session_combo.setEnabled(not running)
         selected = self._selected_session()
-        self.train_button.setEnabled(not running and bool(selected and selected.ready))
-        self.retrain_button.setEnabled(not running and self.service.last_valid_model_dir is not None)
+        self.train_button.setEnabled(
+            self.service.training_enabled and not running and bool(selected and selected.ready)
+        )
+        self.retrain_button.setEnabled(
+            self.service.training_enabled
+            and not running
+            and self.service.last_valid_model_dir is not None
+        )
         self.cancel_button.setEnabled(snapshot.state == "running")
         self.personal_button.setEnabled(not running and self.service.observation_service.personal_model_available)
         self.standard_button.setEnabled(not running)

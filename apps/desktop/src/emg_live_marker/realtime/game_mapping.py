@@ -97,6 +97,13 @@ class GameMappingService(QObject):
     def restore_default(self) -> None:
         self._apply_mapping(self._default_mapping)
 
+    def reset_temporary_state(self) -> None:
+        """Forget the active group and restore classroom defaults without deleting saved groups."""
+
+        self.current_group_id = ""
+        self._apply_mapping(self._default_mapping)
+        self._apply_control_preferences(self._default_control_preferences)
+
     def save_current_group(self, group_id: str) -> tuple[bool, str]:
         normalized = self._valid_group_id(group_id)
         if normalized is None:

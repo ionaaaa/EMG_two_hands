@@ -35,6 +35,7 @@ from emg_live_marker.realtime.student_game_experience import StudentGameExperien
 from emg_live_marker.realtime.student_observation import StudentObservationService
 from emg_live_marker.realtime.student_control_optimization import StudentControlEffectTestService
 from emg_live_marker.realtime.student_competition import StudentCompetitionService
+from emg_live_marker.realtime.teacher_classroom import merge_classroom_overrides
 from emg_live_marker.realtime.student_personal_training import StudentPersonalTrainingService
 from emg_live_marker.ui.student_pages import (
     COURSE_ENTRIES,
@@ -58,7 +59,11 @@ class TeachingConfigError(ValueError):
     """Raised when the student-mode teaching preset cannot be used."""
 
 
-def load_yucai_course_config(paths: ProjectPaths | None = None) -> dict[str, Any]:
+def load_yucai_course_config(
+    paths: ProjectPaths | None = None,
+    *,
+    classroom_settings_path: Path | None = None,
+) -> dict[str, Any]:
     """Load the course metadata required to open student mode.
 
     The location is resolved from the existing project-root path mechanism so no
@@ -85,7 +90,11 @@ def load_yucai_course_config(paths: ProjectPaths | None = None) -> dict[str, Any
     for field in ("id", "name", "language"):
         if not isinstance(course.get(field), str) or not course[field].strip():
             raise TeachingConfigError(f"学生模式课程配置的 course.{field} 必须是非空字符串")
-    return payload
+    return merge_classroom_overrides(
+        payload,
+        project_paths.project_root,
+        settings_path=classroom_settings_path,
+    )
 
 
 class StudentMainWindow(QMainWindow):
@@ -101,11 +110,14 @@ class StudentMainWindow(QMainWindow):
         game_experience_service: StudentGameExperienceService | None = None,
         personal_training_service: StudentPersonalTrainingService | None = None,
         competition_service: StudentCompetitionService | None = None,
+        classroom_settings_path: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.paths = paths or resolve_project_paths()
-        self.course_config = load_yucai_course_config(self.paths)
+        self.course_config = load_yucai_course_config(
+            self.paths, classroom_settings_path=classroom_settings_path
+        )
         self.course = self.course_config["course"]
         self.course_entries = COURSE_ENTRIES
         self.course_entry_buttons: list[QPushButton] = []
@@ -213,6 +225,12 @@ class StudentMainWindow(QMainWindow):
                 ).strip()
                 if configured_group:
                     self.collection_page.anonymous_id_edit.setText(configured_group)
+                configured_trials = str(
+                    self.course_config.get("collection", {}).get("trials_per_action", 10)
+                )
+                if self.collection_page.trials_combo.findText(configured_trials) < 0:
+                    self.collection_page.trials_combo.addItem(configured_trials)
+                self.collection_page.trials_combo.setCurrentText(configured_trials)
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(self.collection_page)
             elif entry.identifier == "view-signals":
                 self.signal_observation_page = StudentSignalObservationPage(
@@ -461,6 +479,22 @@ class StudentMainWindow(QMainWindow):
         self.signal_observation_page.stop()
         self.control_effect_test_service.stop()
         self.game_experience_service.stop()
+        self._stack.setCurrentIndex(self._home_page_index)
+
+    def prepare_next_group(self) -> None:
+        """Clear only volatile student state while retaining all saved artifacts."""
+
+        if self.collection_controller.active:
+            self.collection_controller.end("interrupted")
+        self.control_effect_test_service.stop()
+        self.personal_training_service.close()
+        self.game_experience_service.stop()
+        self.signal_observation_page.stop()
+        self.observation_service.use_standard_model()
+        self.game_mapping_service.reset_temporary_state()
+        self.observation_service.apply_control_profile("standard", "balanced")
+        self.collection_page.anonymous_id_edit.clear()
+        self._collection_side = None
         self._stack.setCurrentIndex(self._home_page_index)
 
     def closeEvent(self, event) -> None:

@@ -93,6 +93,7 @@ class StudentPersonalTrainingService(QObject):
         training = course_config.get("personal_training", {})
         if not isinstance(training, dict):
             training = {}
+        self.training_enabled = bool(training.get("enabled", True))
         self.minimum_trials = max(
             5, int(training.get("minimum_completed_trials_per_gesture", 5))
         )
@@ -151,6 +152,9 @@ class StudentPersonalTrainingService(QObject):
         return self._inspect_session(group_id, Path(session_dir).resolve())
 
     def start_training(self, session: StudentTrainingSession) -> bool:
+        if not self.training_enabled:
+            self._emit("disabled", "老师已关闭本课堂的个人模型训练。")
+            return False
         if self.running:
             self._emit("running", "训练正在进行，请勿重复启动。")
             return False
