@@ -28,7 +28,7 @@
     "randomize_action_order": true
   },
   "realtime_decoding": {
-    "standard_teaching_model_path": "apps/desktop/models/effie_real_full_v2_continue/gesture_classifier.ts",
+    "standard_teaching_model_path": "apps/desktop/models/effie_real_full_v2_continue/gesture_classifier.pt",
     "confidence_threshold": 0.7,
     "smoothing_frames": 5,
     "change_confirmations": 2
