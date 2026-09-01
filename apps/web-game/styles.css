@@ -583,3 +583,6 @@ code {
   .hud { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .runner-wrap, #gameCanvas { min-height: 520px; }
 }
+body.challenge-mode [data-challenge-hide] {
+  display: none !important;
+}

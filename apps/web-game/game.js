@@ -1,5 +1,10 @@
 "use strict";
 
+const APP_MODE = new URLSearchParams(window.location.search).get("mode") === "challenge"
+  ? "challenge"
+  : "experience";
+document.body.classList.toggle("challenge-mode", APP_MODE === "challenge");
+
 /* ===== 手势协议（与 emg_api.py 固定一致） ===== */
 const GESTURE_SET = new Set(["rest", "fist", "open-palm", "pinch"]);
 const NOTE_GESTURES = ["fist", "open-palm", "pinch"];
@@ -90,6 +95,8 @@ const state = {
   musicOn: true,     // 击中音效开关（开则击中时合成播放该音）
   message: "红=握拳 蓝=摊掌 黄=捏合。击中音符即奏响对应音高，漏音则静音。",
   runtimeMapping: DEFAULT_RUNTIME_MAPPING,
+  competitionResultSubmitted: false,
+  competitionRoundId: "",
 
   // 判定参数
   fallDuration: 7000,        // ms：音符从顶部落到判定线的时间（放慢，给更多反应时间）
@@ -996,6 +1003,11 @@ function handAcc(hand) {
   return total ? (hs.perfect + hs.good * 0.5) / total : 0;
 }
 
+function overallAccuracy() {
+  const total = state.perfectCount + state.goodCount + state.missCount;
+  return total ? (state.perfectCount + state.goodCount * 0.5) / total : 0;
+}
+
 function updateScoreboards() {
   el.scoreboards.forEach((sb) => {
     const hand = sb.dataset.hand;
@@ -1041,6 +1053,10 @@ function startGame() {
   state.perfectCount = 0;
   state.goodCount = 0;
   state.missCount = 0;
+  state.competitionResultSubmitted = false;
+  state.competitionRoundId = (window.crypto && typeof window.crypto.randomUUID === "function")
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   state.holding = { left: null, right: null };
   state.holdMissCount = { left: 0, right: 0 };
   state.handStats = {
@@ -1066,18 +1082,55 @@ function startGame() {
 }
 
 function endGame() {
+  if (state.ended) return;
   state.ended = true;
   state.running = false;
   const la = handAcc("left"), ra = handAcc("right");
+  let outcome = "completed";
   if (state.mode === "both") {
     let result;
-    if (Math.abs(la - ra) < 0.0005) result = "平局";
-    else result = la > ra ? "左手玩家获胜" : "右手玩家获胜";
+    if (Math.abs(la - ra) < 0.0005) { result = "平局"; outcome = "draw"; }
+    else if (la > ra) { result = "左手玩家获胜"; outcome = "left_win"; }
+    else { result = "右手玩家获胜"; outcome = "right_win"; }
     state.message = `结束！${result}（左 ${Math.round(la * 100)}% vs 右 ${Math.round(ra * 100)}%）按 Start / 空格 再来一次。`;
   } else {
     state.message = "结束！按 Start / 空格 再来一次。";
   }
   logEvent("End", `L ${Math.round(la * 100)}% vs R ${Math.round(ra * 100)}% · score ${state.score}`);
+  if (APP_MODE === "challenge") submitCompetitionResult(la, ra, outcome);
+}
+
+async function submitCompetitionResult(leftAccuracy, rightAccuracy, outcome) {
+  if (state.competitionResultSubmitted) return;
+  state.competitionResultSubmitted = true;
+  const payload = {
+    mode: state.mode,
+    score: state.score,
+    accuracy: overallAccuracy(),
+    max_combo: state.maxCombo,
+    outcome
+  };
+  if (state.mode === "both") {
+    payload.left_accuracy = leftAccuracy;
+    payload.right_accuracy = rightAccuracy;
+  }
+  try {
+    const response = await fetch("/competition-result", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Competition-Round-ID": state.competitionRoundId
+      },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok || result.ok !== true) {
+      throw new Error(result.message || "成绩保存失败");
+    }
+    state.message += " 成绩已保存。";
+  } catch (_error) {
+    state.message += " 成绩保存失败，请在桌面程序查看提示。";
+  }
 }
 
 /* ===== 事件绑定 ===== */

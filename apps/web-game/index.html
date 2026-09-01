@@ -32,13 +32,13 @@
             <div class="prob-row" data-gesture="open-palm"><span class="prob-dot"></span><small>摊掌</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
             <div class="prob-row" data-gesture="pinch"><span class="prob-dot"></span><small>捏合</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
           </div>
-          <div class="live-meta">
+          <div class="live-meta" data-challenge-hide>
             <span class="live-source">等待 emg_live_marker 启动…</span>
             <span class="live-ctrl-state"></span>
           </div>
         </div>
 
-        <div class="hand-group" id="leftHandBox">
+        <div class="hand-group" id="leftHandBox" data-challenge-hide>
           <h2>LEFT 左手 <small>A S D F</small></h2>
           <div class="gesture-grid" role="group" aria-label="左手手势">
             <button class="gesture-btn fist" data-hand="left" data-gesture="fist" type="button"><span class="swatch"></span><span><strong>Fist</strong><small>红 · 握拳</small></span></button>
@@ -79,7 +79,7 @@
           <p id="gameMessage">红=握拳 蓝=摊掌 黄=捏合。选模式后按 Start / 空格开始。</p>
         </div>
 
-        <div class="panel-block compact">
+        <div class="panel-block compact" data-challenge-hide>
           <div class="label-row"><span>音效 Sound</span><strong id="musicState">开</strong></div>
           <div class="label-row"><span>BPM</span><strong id="bpmVal">80</strong></div>
           <input type="range" id="bpmSlider" class="slider" min="60" max="140" value="80" step="1">
@@ -100,22 +100,22 @@
           <div class="confidence-track"><div class="confidence-fill" id="energyFill"></div></div>
         </div>
 
-        <div class="panel-block compact">
+        <div class="panel-block compact" data-challenge-hide>
           <div class="label-row"><span>Realtime API</span><strong id="bridgeStatus">offline</strong></div>
         </div>
 
-        <div class="panel-block compact">
+        <div class="panel-block compact" data-challenge-hide>
           <div class="label-row"><span>Keyboard</span><strong>A S D F · J K L ;</strong></div>
           <div class="label-row"><span>Start / Restart</span><strong>Space</strong></div>
         </div>
 
-        <div class="panel-block">
+        <div class="panel-block" data-challenge-hide>
           <h2>Adapter Hook</h2>
           <code>window.dispatchGesture("fist", 0.92, "left")</code>
           <code>POST /gesture {gesture,confidence,hand}</code>
         </div>
 
-        <div class="event-log" id="eventLog" aria-live="polite"></div>
+        <div class="event-log" id="eventLog" aria-live="polite" data-challenge-hide></div>
       </section>
 
       <!-- 右栏：右手控制 -->
@@ -142,13 +142,13 @@
             <div class="prob-row" data-gesture="open-palm"><span class="prob-dot"></span><small>摊掌</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
             <div class="prob-row" data-gesture="pinch"><span class="prob-dot"></span><small>捏合</small><div class="prob-bar"><div class="prob-fill"></div></div><strong class="prob-val">0%</strong></div>
           </div>
-          <div class="live-meta">
+          <div class="live-meta" data-challenge-hide>
             <span class="live-source">等待 emg_live_marker 启动…</span>
             <span class="live-ctrl-state"></span>
           </div>
         </div>
 
-        <div class="hand-group" id="rightHandBox">
+        <div class="hand-group" id="rightHandBox" data-challenge-hide>
           <h2>RIGHT 右手 <small>J K L ;</small></h2>
           <div class="gesture-grid" role="group" aria-label="右手手势">
             <button class="gesture-btn fist" data-hand="right" data-gesture="fist" type="button"><span class="swatch"></span><span><strong>Fist</strong><small>红 · 握拳</small></span></button>

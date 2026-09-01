@@ -34,12 +34,14 @@ from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
 from emg_live_marker.realtime.student_observation import StudentObservationService
 from emg_live_marker.realtime.student_control_optimization import StudentControlEffectTestService
+from emg_live_marker.realtime.student_competition import StudentCompetitionService
 from emg_live_marker.realtime.student_personal_training import StudentPersonalTrainingService
 from emg_live_marker.ui.student_pages import (
     COURSE_ENTRIES,
     CourseEntry,
     DeviceCheckPage,
     StudentCollectionPage,
+    StudentChallengePage,
     StudentGameMappingPage,
     StudentQuickExperiencePage,
     StudentPersonalTrainingPage,
@@ -98,6 +100,7 @@ class StudentMainWindow(QMainWindow):
         game_mapping_service: GameMappingService | None = None,
         game_experience_service: StudentGameExperienceService | None = None,
         personal_training_service: StudentPersonalTrainingService | None = None,
+        competition_service: StudentCompetitionService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -148,13 +151,22 @@ class StudentMainWindow(QMainWindow):
             phase_duration_ms=int(phase_duration_ms),
             parent=self,
         )
+        self.competition_service = competition_service or StudentCompetitionService(
+            self.paths.project_root,
+            self.course_config,
+            self.observation_service,
+            self.game_mapping_service,
+            parent=self,
+        )
         self.game_experience_service = game_experience_service or StudentGameExperienceService(
             self.device_check_service,
             self.observation_service,
             self.paths.project_root / "apps" / "web-game",
             mapping_service=self.game_mapping_service,
+            competition_service=self.competition_service,
             parent=self,
         )
+        self.game_experience_service.set_competition_service(self.competition_service)
         self.personal_training_service = (
             personal_training_service
             or StudentPersonalTrainingService(
@@ -228,6 +240,18 @@ class StudentMainWindow(QMainWindow):
                 )
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
                     self.personal_training_page
+                )
+            elif entry.identifier == "challenge":
+                self.challenge_page = StudentChallengePage(
+                    self.game_experience_service,
+                    self.competition_service,
+                    self.game_mapping_service,
+                    self.observation_service,
+                    self._current_anonymous_group_id,
+                    self.show_home,
+                )
+                self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
+                    self.challenge_page
                 )
             else:
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
@@ -305,6 +329,8 @@ class StudentMainWindow(QMainWindow):
             self.game_mapping_page.activate()
         if entry.identifier == "train-model":
             self.personal_training_page.activate()
+        if entry.identifier == "challenge":
+            self.challenge_page.activate()
         self._stack.setCurrentIndex(self._entry_page_indexes[entry.identifier])
 
     def _current_anonymous_group_id(self) -> str:

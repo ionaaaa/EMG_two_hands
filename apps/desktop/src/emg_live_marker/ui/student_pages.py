@@ -32,6 +32,7 @@ from emg_live_marker.realtime.student_control_optimization import (
     ControlTestResult,
     StudentControlEffectTestService,
 )
+from emg_live_marker.realtime.student_competition import StudentCompetitionService
 from emg_live_marker.realtime.student_personal_training import (
     GAME_GESTURES,
     GESTURE_NAMES_ZH as TRAINING_GESTURE_NAMES_ZH,
@@ -334,6 +335,165 @@ class StudentQuickExperiencePage(QWidget):
         )
         color = "#137333" if state == "running" else "#b42318" if state == "error" else "#22577a"
         self.status_label.setStyleSheet(f"font-size: 18px; font-weight: 600; color: {color};")
+
+
+class StudentChallengePage(QWidget):
+    """Student challenge launcher and trusted recent-result summary."""
+
+    def __init__(
+        self,
+        experience_service: StudentGameExperienceService,
+        competition_service: StudentCompetitionService,
+        mapping_service: GameMappingService,
+        observation_service: StudentObservationService,
+        group_id_provider: Callable[[], str],
+        go_home: Callable[[], None],
+    ) -> None:
+        super().__init__()
+        self.setObjectName("student-challenge-page")
+        self.experience_service = experience_service
+        self.competition_service = competition_service
+        self.mapping_service = mapping_service
+        self.observation_service = observation_service
+        self._group_id_provider = group_id_provider
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(48, 32, 48, 32)
+        layout.setSpacing(15)
+
+        title = QLabel("学生挑战赛")
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        title.setStyleSheet("font-size: 28px; font-weight: 700;")
+        layout.addWidget(title)
+        hint = QLabel("使用当前识别模型和本组控制设置完成节奏挑战；比赛成绩由桌面程序安全保存。")
+        hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        summary = QGridLayout()
+        self.group_label = self._summary_row(summary, 0, "匿名小组")
+        self.model_label = self._summary_row(summary, 1, "当前模型")
+        self.mapping_label = self._summary_row(summary, 2, "当前映射")
+        self.sensitivity_label = self._summary_row(summary, 3, "识别灵敏度")
+        self.style_label = self._summary_row(summary, 4, "控制风格")
+        layout.addLayout(summary)
+
+        self.status_label = QLabel("请确认本组设置后开始挑战赛。")
+        self.status_label.setObjectName("student-challenge-status")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        self.recent_title = QLabel("最近一局")
+        self.recent_title.setStyleSheet("font-size: 20px; font-weight: 700;")
+        layout.addWidget(self.recent_title)
+        self.recent_result_label = QLabel("暂无已保存成绩")
+        self.recent_result_label.setObjectName("student-challenge-recent-result")
+        self.recent_result_label.setWordWrap(True)
+        self.recent_result_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.recent_result_label)
+        layout.addStretch(1)
+
+        buttons = QHBoxLayout()
+        self.start_button = QPushButton("开始挑战赛")
+        self.replay_button = QPushButton("再来一局")
+        self.home_button = QPushButton("返回首页")
+        for button in (self.start_button, self.replay_button, self.home_button):
+            button.setMinimumHeight(46)
+        self.start_button.clicked.connect(self._start_challenge)
+        self.replay_button.clicked.connect(self._start_challenge)
+        self.home_button.clicked.connect(go_home)
+        buttons.addWidget(self.start_button)
+        buttons.addWidget(self.replay_button)
+        buttons.addWidget(self.home_button)
+        layout.addLayout(buttons)
+
+        experience_service.status_changed.connect(self._on_experience_status)
+        competition_service.result_saved.connect(self._show_saved_result)
+        competition_service.save_failed.connect(self._show_save_failure)
+        mapping_service.mapping_changed.connect(lambda _config: self.refresh_summary())
+        mapping_service.control_preferences_changed.connect(
+            lambda _sensitivity, _style: self.refresh_summary()
+        )
+        observation_service.model_source_changed.connect(
+            lambda _source, _display: self.refresh_summary()
+        )
+        self.refresh_summary()
+        self.replay_button.setEnabled(False)
+
+    @staticmethod
+    def _summary_row(layout: QGridLayout, row: int, title: str) -> QLabel:
+        name = QLabel(title)
+        name.setStyleSheet("font-size: 17px; font-weight: 600;")
+        value = QLabel()
+        value.setWordWrap(True)
+        value.setStyleSheet("font-size: 17px;")
+        layout.addWidget(name, row, 0)
+        layout.addWidget(value, row, 1)
+        return value
+
+    def activate(self) -> None:
+        group_id = self._group_id_provider().strip()
+        if group_id and group_id != self.mapping_service.current_group_id:
+            self.mapping_service.load_group(group_id)
+        self.refresh_summary()
+        if self.competition_service.latest_result is not None:
+            self._show_saved_result(self.competition_service.latest_result)
+
+    def refresh_summary(self) -> None:
+        group_id = self._group_id_provider().strip()
+        self.group_label.setText(group_id or "未填写")
+        self.model_label.setText(
+            "我的模型" if self.observation_service.model_source == "personal" else "标准模型"
+        )
+        mapping = self.mapping_service.resolved_mapping
+        commands = self.mapping_service.commands
+        fist = commands[mapping["fist"]]["display_name_zh"]
+        palm = commands[mapping["open-palm"]]["display_name_zh"]
+        self.mapping_label.setText(f"握拳 → {fist}；伸掌 → {palm}")
+        sensitivity_names = {"low": "低", "standard": "标准", "high": "高"}
+        style_names = {"fast": "响应快", "balanced": "均衡", "stable": "更稳定"}
+        self.sensitivity_label.setText(
+            sensitivity_names.get(self.observation_service.current_sensitivity, "标准")
+        )
+        self.style_label.setText(
+            style_names.get(self.observation_service.current_control_style, "均衡")
+        )
+
+    def _start_challenge(self) -> None:
+        group_id = self._group_id_provider().strip()
+        if not group_id:
+            self.status_label.setText("请先填写匿名小组编号，才能开始挑战赛。")
+            return
+        self.refresh_summary()
+        self.experience_service.start_challenge(group_id)
+
+    def _on_experience_status(self, state: str, message: str) -> None:
+        self.status_label.setText(message)
+        starting = state in {"checking", "starting", "waiting-client"}
+        self.start_button.setEnabled(not starting and state != "running")
+        self.replay_button.setEnabled(not starting and state == "running")
+
+    def _show_saved_result(self, result: dict) -> None:
+        mode_names = {"left": "左手单手", "right": "右手单手", "both": "双手"}
+        outcome_names = {
+            "completed": "挑战完成",
+            "draw": "平局",
+            "left_win": "左手获胜",
+            "right_win": "右手获胜",
+        }
+        accuracy = float(result.get("accuracy", 0.0))
+        self.recent_result_label.setText(
+            f"模式：{mode_names.get(str(result.get('mode')), '未知')}　"
+            f"得分：{int(result.get('score', 0))}　正确率：{accuracy:.1%}　"
+            f"最大连击：{int(result.get('max_combo', 0))}　"
+            f"最终结果：{outcome_names.get(str(result.get('outcome')), str(result.get('outcome', '')))}\n"
+            "成绩已保存"
+        )
+        self.status_label.setText("成绩已保存，可以再来一局。")
+        self.replay_button.setEnabled(self.experience_service.running)
+
+    def _show_save_failure(self, message: str) -> None:
+        self.status_label.setText(message + "；网页中的本局结果不受影响。")
 
 
 class StudentGameMappingPage(QWidget):
