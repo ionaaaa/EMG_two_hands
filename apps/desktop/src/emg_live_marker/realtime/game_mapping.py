@@ -1,0 +1,208 @@
+"""Validated student game-command mapping and anonymous-group persistence."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+from PySide6.QtCore import QObject, QStandardPaths, Signal
+
+GESTURES = ("rest", "fist", "open-palm", "pinch")
+EDITABLE_GESTURES = ("fist", "open-palm")
+COMMANDS = ("A", "B", "none")
+
+
+class GameMappingConfigError(ValueError):
+    """Raised when the locked teaching mapping configuration is invalid."""
+
+
+class GameMappingService(QObject):
+    """Own all validation, mutation, and storage for the student mapping page."""
+
+    mapping_changed = Signal(dict)
+    test_feedback = Signal(dict)
+
+    def __init__(
+        self,
+        course_config: dict[str, Any],
+        *,
+        storage_root: Path | None = None,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        game = course_config.get("game", {})
+        if not isinstance(game, dict):
+            raise GameMappingConfigError("课程游戏配置无效")
+        self._commands = self._validate_commands(game.get("commands"))
+        self._default_mapping = self._validate_mapping(game.get("default_mapping"))
+        self._mapping = dict(self._default_mapping)
+        self.current_group_id = ""
+        default_root = Path(
+            QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
+        ) / "student-game-mappings"
+        self.storage_root = Path(storage_root or default_root).resolve()
+        self._restore_last_group()
+
+    @property
+    def commands(self) -> dict[str, dict[str, str]]:
+        return {command: dict(details) for command, details in self._commands.items()}
+
+    @property
+    def default_mapping(self) -> dict[str, str]:
+        return dict(self._default_mapping)
+
+    @property
+    def resolved_mapping(self) -> dict[str, str]:
+        return dict(self._mapping)
+
+    def set_editable_mapping(self, fist_command: str, open_palm_command: str) -> None:
+        candidate = dict(self._mapping)
+        candidate["fist"] = str(fist_command)
+        candidate["open-palm"] = str(open_palm_command)
+        self._apply_mapping(candidate)
+
+    def swap_commands(self) -> None:
+        self.set_editable_mapping(self._mapping["open-palm"], self._mapping["fist"])
+
+    def restore_default(self) -> None:
+        self._apply_mapping(self._default_mapping)
+
+    def save_current_group(self, group_id: str) -> tuple[bool, str]:
+        normalized = self._valid_group_id(group_id)
+        if normalized is None:
+            return False, "请先填写匿名小组编号，只能使用字母、数字、下划线和短横线。"
+        payload = {
+            "schema_version": 1,
+            "anonymous_group_id": normalized,
+            "mapping": self.resolved_mapping,
+        }
+        try:
+            self.storage_root.mkdir(parents=True, exist_ok=True)
+            self._write_json(self._group_path(normalized), payload)
+            self._write_json(
+                self.storage_root / "current-group.json",
+                {"schema_version": 1, "anonymous_group_id": normalized},
+            )
+        except OSError:
+            return False, "本组设置保存失败，请稍后重试。"
+        self.current_group_id = normalized
+        return True, f"已保存匿名小组 {normalized} 的游戏指令设置。"
+
+    def load_group(self, group_id: str) -> tuple[bool, str]:
+        normalized = self._valid_group_id(group_id)
+        if normalized is None:
+            return False, "请先填写有效的匿名小组编号。"
+        path = self._group_path(normalized)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            mapping = self._validate_mapping(payload.get("mapping"))
+        except FileNotFoundError:
+            return False, "未找到该匿名小组已保存的设置，将使用当前设置。"
+        except (OSError, json.JSONDecodeError, AttributeError, GameMappingConfigError):
+            return False, "该匿名小组的设置文件无效，将使用当前设置。"
+        self.current_group_id = normalized
+        self._apply_mapping(mapping)
+        return True, f"已加载匿名小组 {normalized} 的游戏指令设置。"
+
+    def test_mapping(self) -> str:
+        fist = self._commands[self._mapping["fist"]]["display_name_zh"]
+        open_palm = self._commands[self._mapping["open-palm"]]["display_name_zh"]
+        message = f"映射测试：握拳 → {fist}；伸掌 → {open_palm}。未生成任何识别结果。"
+        self.test_feedback.emit(
+            {
+                "test": True,
+                "kind": "mapping-test",
+                "resolved_mapping": self.resolved_mapping,
+                "message": message,
+            }
+        )
+        return message
+
+    def runtime_config(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "commands": self.commands,
+            "default_mapping": self.default_mapping,
+            "resolved_mapping": self.resolved_mapping,
+            "anonymous_group_id": self.current_group_id,
+        }
+
+    def _apply_mapping(self, mapping: object) -> None:
+        validated = self._validate_mapping(mapping)
+        if validated == self._mapping:
+            return
+        self._mapping = validated
+        self.mapping_changed.emit(self.runtime_config())
+
+    def _restore_last_group(self) -> None:
+        path = self.storage_root / "current-group.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            group_id = payload.get("anonymous_group_id", "")
+        except (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError):
+            return
+        normalized = self._valid_group_id(str(group_id))
+        if normalized is None:
+            return
+        group_path = self._group_path(normalized)
+        try:
+            saved = json.loads(group_path.read_text(encoding="utf-8"))
+            self._mapping = self._validate_mapping(saved.get("mapping"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError, AttributeError, GameMappingConfigError):
+            return
+        self.current_group_id = normalized
+
+    def _group_path(self, group_id: str) -> Path:
+        return self.storage_root / f"{group_id}.json"
+
+    @staticmethod
+    def _valid_group_id(group_id: str) -> str | None:
+        normalized = str(group_id).strip()
+        if not normalized or ".." in normalized or not re.fullmatch(r"[A-Za-z0-9_-]+", normalized):
+            return None
+        return normalized
+
+    @staticmethod
+    def _write_json(path: Path, payload: dict[str, Any]) -> None:
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+
+    @staticmethod
+    def _validate_commands(value: object) -> dict[str, dict[str, str]]:
+        if not isinstance(value, dict) or set(value) != set(COMMANDS):
+            raise GameMappingConfigError("课程指令配置必须包含 A、B 和 none")
+        commands: dict[str, dict[str, str]] = {}
+        expected_gestures = {"A": "fist", "B": "open-palm", "none": "rest"}
+        for command in COMMANDS:
+            details = value.get(command)
+            if not isinstance(details, dict):
+                raise GameMappingConfigError(f"课程指令 {command} 配置无效")
+            display_name = details.get("display_name_zh")
+            game_gesture = details.get("game_gesture")
+            if not isinstance(display_name, str) or not display_name.strip():
+                raise GameMappingConfigError(f"课程指令 {command} 缺少中文名称")
+            if game_gesture != expected_gestures[command]:
+                raise GameMappingConfigError(f"课程指令 {command} 的游戏手势无效")
+            commands[command] = {
+                "display_name_zh": display_name.strip(),
+                "game_gesture": str(game_gesture),
+            }
+        return commands
+
+    @staticmethod
+    def _validate_mapping(value: object) -> dict[str, str]:
+        if not isinstance(value, dict) or set(value) != set(GESTURES):
+            raise GameMappingConfigError("游戏映射必须包含四类课程手势")
+        mapping = {gesture: str(value[gesture]) for gesture in GESTURES}
+        if mapping["rest"] != "none" or mapping["pinch"] != "none":
+            raise GameMappingConfigError("放松和捏合必须固定为无操作")
+        if {mapping["fist"], mapping["open-palm"]} != {"A", "B"}:
+            raise GameMappingConfigError("握拳和伸掌必须一一对应指令 A/B")
+        return mapping
+

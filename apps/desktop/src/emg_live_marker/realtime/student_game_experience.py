@@ -2,25 +2,51 @@
 
 from __future__ import annotations
 
+import json
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread, current_thread
 from time import monotonic
 from typing import Callable
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
 from emg_live_marker.device.check_service import DeviceCheckResult, DeviceCheckService
 from emg_live_marker.realtime.gesture_server import GestureServer
+from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.student_observation import (
     STUDENT_GESTURES,
     StudentObservationService,
 )
 
 
-class _QuietStaticRequestHandler(SimpleHTTPRequestHandler):
+class _StudentGameRequestHandler(SimpleHTTPRequestHandler):
+    def __init__(
+        self,
+        *args: object,
+        runtime_config_provider: Callable[[], dict],
+        **kwargs: object,
+    ) -> None:
+        self._runtime_config_provider = runtime_config_provider
+        super().__init__(*args, **kwargs)
+
+    def do_GET(self) -> None:  # noqa: N802
+        if urlsplit(self.path).path == "/runtime-config.json":
+            body = json.dumps(
+                self._runtime_config_provider(), ensure_ascii=False
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
+
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         return
 
@@ -36,6 +62,7 @@ class StudentGameExperienceService(QObject):
         observation_service: StudentObservationService,
         web_game_root: Path,
         *,
+        mapping_service: GameMappingService | None = None,
         gesture_server: GestureServer | None = None,
         browser_opener: Callable[[QUrl], bool | None] | None = None,
         client_wait_timeout_ms: int = 8000,
@@ -45,6 +72,7 @@ class StudentGameExperienceService(QObject):
         self.device_check_service = device_check_service
         self.observation_service = observation_service
         self.web_game_root = Path(web_game_root).resolve()
+        self.mapping_service = mapping_service
         self.gesture_server = gesture_server or GestureServer(host="127.0.0.1", port=8766)
         self.browser_opener = browser_opener or QDesktopServices.openUrl
         self.client_wait_timeout_ms = max(100, int(client_wait_timeout_ms))
@@ -60,6 +88,9 @@ class StudentGameExperienceService(QObject):
         self._client_timer.timeout.connect(self._poll_sse_client)
         self.device_check_service.result_changed.connect(self._on_device_result)
         self.observation_service.gesture_updated.connect(self._publish_gesture)
+        if self.mapping_service is not None:
+            self.mapping_service.mapping_changed.connect(self._publish_mapping)
+            self.mapping_service.test_feedback.connect(self._publish_mapping_test)
 
     @property
     def starting(self) -> bool:
@@ -165,7 +196,11 @@ class StudentGameExperienceService(QObject):
         index_path = self.web_game_root / "index.html"
         if not index_path.is_file():
             raise OSError("web game index is missing")
-        handler = partial(_QuietStaticRequestHandler, directory=str(self.web_game_root))
+        handler = partial(
+            _StudentGameRequestHandler,
+            directory=str(self.web_game_root),
+            runtime_config_provider=self.runtime_config,
+        )
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         server.daemon_threads = True
         self._http_server = server
@@ -204,6 +239,7 @@ class StudentGameExperienceService(QObject):
         if self.gesture_server.client_count > 0:
             self._client_timer.stop()
             self._phase = "running"
+            self._publish_mapping(self.runtime_config())
             self._publish_hand_statuses()
             self._set_status("running", "标准模型和游戏已启动，网页连接正常。")
             return
@@ -243,6 +279,46 @@ class StudentGameExperienceService(QObject):
                     "game_control": connected,
                 },
             )
+
+    def runtime_config(self) -> dict:
+        if self.mapping_service is not None:
+            return self.mapping_service.runtime_config()
+        return {
+            "schema_version": 1,
+            "commands": {
+                "A": {"display_name_zh": "红色音符/指令 A", "game_gesture": "fist"},
+                "B": {
+                    "display_name_zh": "蓝色音符/指令 B",
+                    "game_gesture": "open-palm",
+                },
+                "none": {"display_name_zh": "无操作", "game_gesture": "rest"},
+            },
+            "default_mapping": {
+                "rest": "none",
+                "fist": "A",
+                "open-palm": "B",
+                "pinch": "none",
+            },
+            "resolved_mapping": {
+                "rest": "none",
+                "fist": "A",
+                "open-palm": "B",
+                "pinch": "none",
+            },
+            "anonymous_group_id": "",
+        }
+
+    def _publish_mapping(self, runtime_config: dict) -> None:
+        if self._phase not in {"waiting-client", "running"}:
+            return
+        self.gesture_server.publish("mapping", dict(runtime_config))
+
+    def _publish_mapping_test(self, payload: dict) -> None:
+        if self._phase not in {"waiting-client", "running"}:
+            return
+        marked = dict(payload)
+        marked["test"] = True
+        self.gesture_server.publish("mapping_test", marked)
 
     def _fail(self, message: str) -> None:
         self._phase = "failing"

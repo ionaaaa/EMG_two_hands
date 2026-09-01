@@ -30,6 +30,7 @@ from emg_live_marker.device.check_service import (
 )
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 from emg_live_marker.realtime.collection import CollectionController, CollectionPlan
+from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
 from emg_live_marker.realtime.student_observation import StudentObservationService
 from emg_live_marker.ui.student_pages import (
@@ -37,6 +38,7 @@ from emg_live_marker.ui.student_pages import (
     CourseEntry,
     DeviceCheckPage,
     StudentCollectionPage,
+    StudentGameMappingPage,
     StudentQuickExperiencePage,
     StudentSignalObservationPage,
     create_collection_gate_page,
@@ -90,6 +92,7 @@ class StudentMainWindow(QMainWindow):
         *,
         simulate: bool = False,
         device_check_service: DeviceCheckService | None = None,
+        game_mapping_service: GameMappingService | None = None,
         game_experience_service: StudentGameExperienceService | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -119,10 +122,15 @@ class StudentMainWindow(QMainWindow):
             self.course_config,
             parent=self,
         )
+        self.game_mapping_service = game_mapping_service or GameMappingService(
+            self.course_config,
+            parent=self,
+        )
         self.game_experience_service = game_experience_service or StudentGameExperienceService(
             self.device_check_service,
             self.observation_service,
             self.paths.project_root / "apps" / "web-game",
+            mapping_service=self.game_mapping_service,
             parent=self,
         )
         self.device_check_service.emg_packets_received.connect(self._on_device_emg_packets)
@@ -154,6 +162,13 @@ class StudentMainWindow(QMainWindow):
                     self.end_collection,
                     self.show_home,
                 )
+                configured_group = str(
+                    self.course_config.get("student_mode", {})
+                    .get("student", {})
+                    .get("student_id", "")
+                ).strip()
+                if configured_group:
+                    self.collection_page.anonymous_id_edit.setText(configured_group)
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(self.collection_page)
             elif entry.identifier == "view-signals":
                 self.signal_observation_page = StudentSignalObservationPage(
@@ -162,6 +177,15 @@ class StudentMainWindow(QMainWindow):
                 )
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
                     self.signal_observation_page
+                )
+            elif entry.identifier == "configure-game":
+                self.game_mapping_page = StudentGameMappingPage(
+                    self.game_mapping_service,
+                    self._current_anonymous_group_id,
+                    self.show_home,
+                )
+                self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
+                    self.game_mapping_page
                 )
             else:
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
@@ -235,7 +259,13 @@ class StudentMainWindow(QMainWindow):
                 left_ready=self.session_device_result.left.ready_for_collection,
                 right_ready=self.session_device_result.right.ready_for_collection,
             )
+        if entry.identifier == "configure-game":
+            self.game_mapping_page.activate()
         self._stack.setCurrentIndex(self._entry_page_indexes[entry.identifier])
+
+    def _current_anonymous_group_id(self) -> str:
+        entered = self.collection_page.anonymous_id_edit.text().strip()
+        return entered or self.game_mapping_service.current_group_id
 
     def open_device_check(self) -> None:
         self._stack.setCurrentIndex(self._entry_page_indexes["connect-bracelet"])

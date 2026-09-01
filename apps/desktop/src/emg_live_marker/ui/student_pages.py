@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from emg_live_marker.device.check_service import ConnectionState, DeviceCheckResult
+from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.student_observation import (
     STUDENT_DISPLAY_MODES,
     STUDENT_GESTURES,
@@ -52,8 +53,7 @@ COURSE_ENTRIES: tuple[CourseEntry, ...] = (
     CourseEntry(
         "configure-game",
         "设置游戏指令",
-        "游戏指令设置将在后续课程中开放。",
-        available=False,
+        "交换握拳和伸掌对应的红蓝游戏指令。",
     ),
     CourseEntry(
         "train-model",
@@ -323,6 +323,132 @@ class StudentQuickExperiencePage(QWidget):
         )
         color = "#137333" if state == "running" else "#b42318" if state == "error" else "#22577a"
         self.status_label.setStyleSheet(f"font-size: 18px; font-weight: 600; color: {color};")
+
+
+class StudentGameMappingPage(QWidget):
+    """Visual controls for the two editable student game commands."""
+
+    def __init__(
+        self,
+        service: GameMappingService,
+        group_id_provider: Callable[[], str],
+        go_home: Callable[[], None],
+    ) -> None:
+        super().__init__()
+        self.setObjectName("student-game-mapping-page")
+        self.service = service
+        self._group_id_provider = group_id_provider
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(48, 32, 48, 32)
+        layout.setSpacing(16)
+
+        title = QLabel("设置游戏指令")
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        title.setStyleSheet("font-size: 28px; font-weight: 700;")
+        layout.addWidget(title)
+        hint = QLabel("只能交换握拳和伸掌对应的红蓝指令；放松和捏合规则保持固定。")
+        hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        mapping_grid = QGridLayout()
+        mapping_grid.setHorizontalSpacing(24)
+        mapping_grid.setVerticalSpacing(12)
+        mapping_grid.addWidget(QLabel("动作"), 0, 0)
+        mapping_grid.addWidget(QLabel("当前游戏指令"), 0, 1)
+        self.fist_mapping_label = self._add_mapping_row(mapping_grid, 1, "握拳")
+        self.open_palm_mapping_label = self._add_mapping_row(mapping_grid, 2, "伸掌")
+        self.rest_mapping_label = self._add_mapping_row(mapping_grid, 3, "放松（固定）")
+        self.pinch_mapping_label = self._add_mapping_row(mapping_grid, 4, "捏合（本轮不参与）")
+        layout.addLayout(mapping_grid)
+
+        self.group_label = QLabel("匿名小组：未填写")
+        self.group_label.setObjectName("game-mapping-group")
+        self.group_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.group_label)
+        self.message_label = QLabel("")
+        self.message_label.setObjectName("game-mapping-message")
+        self.message_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.message_label.setWordWrap(True)
+        layout.addWidget(self.message_label)
+        layout.addStretch(1)
+
+        buttons = QGridLayout()
+        self.swap_button = QPushButton("交换指令")
+        self.test_button = QPushButton("测试映射")
+        self.restore_button = QPushButton("恢复默认")
+        self.save_button = QPushButton("保存本组设置")
+        self.home_button = QPushButton("返回首页")
+        self.swap_button.setObjectName("swap-game-mapping")
+        self.test_button.setObjectName("test-game-mapping")
+        self.restore_button.setObjectName("restore-default-game-mapping")
+        self.save_button.setObjectName("save-group-game-mapping")
+        for button in (self.swap_button, self.test_button, self.restore_button, self.save_button):
+            button.setMinimumHeight(44)
+        self.swap_button.clicked.connect(self.service.swap_commands)
+        self.test_button.clicked.connect(self._test_mapping)
+        self.restore_button.clicked.connect(self.service.restore_default)
+        self.save_button.clicked.connect(self._save_mapping)
+        self.home_button.clicked.connect(go_home)
+        buttons.addWidget(self.swap_button, 0, 0)
+        buttons.addWidget(self.test_button, 0, 1)
+        buttons.addWidget(self.restore_button, 1, 0)
+        buttons.addWidget(self.save_button, 1, 1)
+        buttons.addWidget(self.home_button, 2, 0, 1, 2)
+        layout.addLayout(buttons)
+
+        self.service.mapping_changed.connect(self._on_mapping_changed)
+        self._render_mapping()
+
+    @staticmethod
+    def _add_mapping_row(grid: QGridLayout, row: int, gesture_name: str) -> QLabel:
+        gesture = QLabel(gesture_name)
+        gesture.setStyleSheet("font-size: 18px; font-weight: 600;")
+        command = QLabel()
+        command.setStyleSheet("font-size: 18px; font-weight: 700;")
+        grid.addWidget(gesture, row, 0)
+        grid.addWidget(command, row, 1)
+        return command
+
+    def activate(self) -> None:
+        active_group = self._group_id_provider().strip() or self.service.current_group_id
+        if active_group:
+            _loaded, message = self.service.load_group(active_group)
+            self.message_label.setText(message)
+        self.group_label.setText(f"匿名小组：{active_group}" if active_group else "匿名小组：未填写")
+        self._render_mapping()
+
+    def _on_mapping_changed(self, _runtime_config: dict) -> None:
+        self._render_mapping()
+        self.message_label.setText("映射已更新；如需下次恢复，请保存本组设置。")
+
+    def _render_mapping(self) -> None:
+        mapping = self.service.resolved_mapping
+        commands = self.service.commands
+        labels = {
+            gesture: commands[command]["display_name_zh"]
+            for gesture, command in mapping.items()
+        }
+        self.fist_mapping_label.setText(labels["fist"])
+        self.open_palm_mapping_label.setText(labels["open-palm"])
+        self.rest_mapping_label.setText(labels["rest"])
+        self.pinch_mapping_label.setText(labels["pinch"])
+        for label, command in (
+            (self.fist_mapping_label, mapping["fist"]),
+            (self.open_palm_mapping_label, mapping["open-palm"]),
+        ):
+            color = "#c62828" if command == "A" else "#0077a8"
+            label.setStyleSheet(f"font-size: 18px; font-weight: 700; color: {color};")
+
+    def _test_mapping(self) -> None:
+        self.message_label.setText(self.service.test_mapping())
+
+    def _save_mapping(self) -> None:
+        group_id = self._group_id_provider().strip() or self.service.current_group_id
+        saved, message = self.service.save_current_group(group_id)
+        self.message_label.setText(message)
+        if saved:
+            self.group_label.setText(f"匿名小组：{self.service.current_group_id}")
 
 
 class StudentSignalObservationPage(QWidget):

@@ -16,6 +16,14 @@ const GESTURE_LABEL = { rest: "REST", fist: "FIST", "open-palm": "OPEN", pinch: 
 const GESTURE_CN = { rest: "放松", fist: "握拳", "open-palm": "摊掌", pinch: "捏合" };
 const HAND_CN = { left: "左", right: "右" };
 const GRADE_CN = { perfect: "完美", good: "良好" };
+const DEFAULT_RUNTIME_MAPPING = {
+  commands: {
+    A: { display_name_zh: "红色音符/指令 A", game_gesture: "fist" },
+    B: { display_name_zh: "蓝色音符/指令 B", game_gesture: "open-palm" },
+    none: { display_name_zh: "无操作", game_gesture: "rest" }
+  },
+  resolved_mapping: { rest: "none", fist: "A", "open-palm": "B", pinch: "none" }
+};
 const REASON_CN = {
   timeout: "超时未击打",
   wrong: "手势错误",
@@ -81,6 +89,7 @@ const state = {
   bpm: 80,
   musicOn: true,     // 击中音效开关（开则击中时合成播放该音）
   message: "红=握拳 蓝=摊掌 黄=捏合。击中音符即奏响对应音高，漏音则静音。",
+  runtimeMapping: DEFAULT_RUNTIME_MAPPING,
 
   // 判定参数
   fallDuration: 7000,        // ms：音符从顶部落到判定线的时间（放慢，给更多反应时间）
@@ -199,6 +208,38 @@ function normalizeHand(value) {
   if (h === "l" || h === "left") return "left";
   if (h === "r" || h === "right") return "right";
   return "left";
+}
+
+function applyRuntimeMappingConfig(payload) {
+  const commands = payload && payload.commands;
+  const mapping = payload && payload.resolved_mapping;
+  if (!commands || !mapping) return false;
+  if (mapping.rest !== "none" || mapping.pinch !== "none") return false;
+  if (new Set([mapping.fist, mapping["open-palm"]]).size !== 2) return false;
+  if (![mapping.fist, mapping["open-palm"]].every((command) => command === "A" || command === "B")) return false;
+  for (const command of ["A", "B", "none"]) {
+    if (!commands[command] || !GESTURE_SET.has(normalizeGesture(commands[command].game_gesture))) return false;
+  }
+  state.runtimeMapping = { commands, resolved_mapping: mapping };
+  return true;
+}
+
+function mapRealtimeGesture(gesture) {
+  const normalized = normalizeGesture(gesture);
+  const runtime = state.runtimeMapping || DEFAULT_RUNTIME_MAPPING;
+  const command = runtime.resolved_mapping[normalized] || "none";
+  const target = runtime.commands[command] && runtime.commands[command].game_gesture;
+  return normalizeGesture(target || "rest");
+}
+
+async function loadRuntimeMappingConfig() {
+  try {
+    const response = await fetch("runtime-config.json", { cache: "no-store" });
+    if (!response.ok) return false;
+    return applyRuntimeMappingConfig(await response.json());
+  } catch (_error) {
+    return false;
+  }
 }
 
 function logEvent(label, detail) {
@@ -523,7 +564,8 @@ function refreshLiveRecog() { updateLiveRecog(); }
 function applyLiveGesture(hand) {
   ensureAudio();  // 实时数据可能在用户无交互时到达，确保音频上下文已激活
   const live = state.live[hand];
-  const gesture = live.gesture;
+  const recognizedGesture = live.gesture;
+  const gesture = mapRealtimeGesture(recognizedGesture);
   const prev = state.hands[hand];
   state.hands[hand] = gesture;
   state.confidence[hand] = live.confidence;
@@ -533,7 +575,8 @@ function applyLiveGesture(hand) {
   if (live.gameControl && state.running && !state.ended) {
     handleGesture(hand, gesture);
     if (gesture !== prev) {
-      logEvent(`LIVE ${HAND_CN[hand]} ${GESTURE_LABEL[gesture]}`, `${Math.round(live.confidence * 100)}%`);
+      const command = state.runtimeMapping.resolved_mapping[recognizedGesture] || "none";
+      logEvent(`LIVE ${HAND_CN[hand]} ${GESTURE_LABEL[recognizedGesture]}`, `→ 指令 ${command} · ${Math.round(live.confidence * 100)}%`);
     }
   }
 }
@@ -577,6 +620,20 @@ function connectRealtimeGestureApi(primary = "http://127.0.0.1:8766/events", fal
       refreshLiveRecog();
     } catch (e) { /* ignore malformed status */ }
   };
+  const onMapping = (event) => {
+    try {
+      if (applyRuntimeMappingConfig(JSON.parse(event.data))) {
+        for (const hand of HANDS) if (state.live[hand].connected) applyLiveGesture(hand);
+        logEvent("MAPPING", "游戏指令映射已更新");
+      }
+    } catch (e) { /* ignore malformed mapping */ }
+  };
+  const onMappingTest = (event) => {
+    try {
+      const p = JSON.parse(event.data);
+      if (p.test === true) logEvent("MAPPING TEST", p.message || "映射层测试");
+    } catch (e) { /* ignore malformed test feedback */ }
+  };
   const open = (url, isFallback) => {
     if (source) source.close();
     source = new EventSource(url);
@@ -596,6 +653,8 @@ function connectRealtimeGestureApi(primary = "http://127.0.0.1:8766/events", fal
     };
     source.addEventListener("gesture", onGesture);
     source.addEventListener("hand_status", onHandStatus);
+    source.addEventListener("mapping", onMapping);
+    source.addEventListener("mapping_test", onMappingTest);
     source.addEventListener("status", (event) => setBridgeStatus(event.data || "online"));
   };
   open(primary, false);
@@ -1108,5 +1167,5 @@ window.debugChart = () => {
 
 resizeCanvas();
 refreshLiveRecog();
-connectRealtimeGestureApi();
+loadRuntimeMappingConfig().finally(() => connectRealtimeGestureApi());
 requestAnimationFrame(loop);

@@ -78,10 +78,11 @@ def test_student_window_contains_all_course_entries(app) -> None:
 def test_future_course_entries_are_disabled_and_clearly_marked(app) -> None:
     window = StudentMainWindow(paths=resolve_project_paths())
     try:
-        for index in (5, 6):
+        for index in (6,):
             button = window.course_entry_buttons[index]
             assert button.isEnabled() is False
             assert "后续课程开放" in button.text()
+        assert window.course_entry_buttons[5].isEnabled() is True
     finally:
         window.close()
 
