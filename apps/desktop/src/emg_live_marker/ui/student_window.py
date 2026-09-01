@@ -30,12 +30,14 @@ from emg_live_marker.device.check_service import (
 )
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 from emg_live_marker.realtime.collection import CollectionController, CollectionPlan
+from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
 from emg_live_marker.realtime.student_observation import StudentObservationService
 from emg_live_marker.ui.student_pages import (
     COURSE_ENTRIES,
     CourseEntry,
     DeviceCheckPage,
     StudentCollectionPage,
+    StudentQuickExperiencePage,
     StudentSignalObservationPage,
     create_collection_gate_page,
     create_course_page,
@@ -88,6 +90,7 @@ class StudentMainWindow(QMainWindow):
         *,
         simulate: bool = False,
         device_check_service: DeviceCheckService | None = None,
+        game_experience_service: StudentGameExperienceService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -116,6 +119,12 @@ class StudentMainWindow(QMainWindow):
             self.course_config,
             parent=self,
         )
+        self.game_experience_service = game_experience_service or StudentGameExperienceService(
+            self.device_check_service,
+            self.observation_service,
+            self.paths.project_root / "apps" / "web-game",
+            parent=self,
+        )
         self.device_check_service.emg_packets_received.connect(self._on_device_emg_packets)
 
         self.setWindowTitle(f"{self.course['name']} - 学生模式")
@@ -129,6 +138,14 @@ class StudentMainWindow(QMainWindow):
             if entry.identifier == "connect-bracelet":
                 self.device_check_page = DeviceCheckPage(self.start_device_check, self.show_home)
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(self.device_check_page)
+            elif entry.identifier == "quick-experience":
+                self.quick_experience_page = StudentQuickExperiencePage(
+                    self.game_experience_service,
+                    self.show_home,
+                )
+                self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
+                    self.quick_experience_page
+                )
             elif entry.identifier == "collect-gestures":
                 self.collection_page = StudentCollectionPage(
                     self.start_collection,
@@ -342,11 +359,13 @@ class StudentMainWindow(QMainWindow):
                 return
             self.collection_controller.end("partial")
         self.signal_observation_page.stop()
+        self.game_experience_service.stop()
         self._stack.setCurrentIndex(self._home_page_index)
 
     def closeEvent(self, event) -> None:
         if self.collection_controller.active:
             self.collection_controller.end("interrupted")
         self.signal_observation_page.stop()
+        self.game_experience_service.stop()
         self.device_check_service.close()
         super().closeEvent(event)

@@ -17,11 +17,15 @@ class GestureEventBroadcaster:
     def __init__(self) -> None:
         self._clients: set[queue.Queue[dict[str, Any]]] = set()
         self._lock = threading.Lock()
+        self._closing = False
 
     def subscribe(self) -> queue.Queue[dict[str, Any]]:
         client: queue.Queue[dict[str, Any]] = queue.Queue()
         with self._lock:
             self._clients.add(client)
+            closing = self._closing
+        if closing:
+            client.put({"event": "__close__", "data": {}})
         return client
 
     def unsubscribe(self, client: queue.Queue[dict[str, Any]]) -> None:
@@ -33,6 +37,26 @@ class GestureEventBroadcaster:
             clients = list(self._clients)
         for client in clients:
             client.put({"event": event, "data": payload})
+
+    @property
+    def client_count(self) -> int:
+        """Return the number of currently subscribed SSE clients."""
+
+        with self._lock:
+            return len(self._clients)
+
+    def close_clients(self) -> None:
+        """Wake connected request threads so server shutdown cannot strand them."""
+
+        with self._lock:
+            self._closing = True
+            clients = list(self._clients)
+        for client in clients:
+            client.put({"event": "__close__", "data": {}})
+
+    def reopen(self) -> None:
+        with self._lock:
+            self._closing = False
 
 
 class _GestureRequestHandler(BaseHTTPRequestHandler):
@@ -65,6 +89,8 @@ class _GestureRequestHandler(BaseHTTPRequestHandler):
             while True:
                 try:
                     msg = client.get(timeout=15)
+                    if msg["event"] == "__close__":
+                        break
                     message = f"event: {msg['event']}\ndata: {json.dumps(msg['data'])}\n\n"
                 except queue.Empty:
                     message = ": keepalive\n\n"
@@ -106,8 +132,10 @@ class GestureServer:
     def start(self) -> None:
         if self._server is not None:
             return
+        self.broadcaster.reopen()
         server = ThreadingHTTPServer((self.host, self.port), _GestureRequestHandler)
         server.broadcaster = self.broadcaster  # type: ignore[attr-defined]
+        self.port = int(server.server_address[1])
         self._server = server
         self._thread = threading.Thread(
             target=self._server.serve_forever,
@@ -118,10 +146,19 @@ class GestureServer:
 
     def stop(self) -> None:
         if self._server is not None:
+            self.broadcaster.close_clients()
             self._server.shutdown()
             self._server.server_close()
             self._server = None
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2.0)
         self._thread = None
 
     def publish(self, event: str, payload: dict[str, Any]) -> None:
         self.broadcaster.publish(event, payload)
+
+    @property
+    def client_count(self) -> int:
+        """Read-only count used to verify that a browser EventSource connected."""
+
+        return self.broadcaster.client_count

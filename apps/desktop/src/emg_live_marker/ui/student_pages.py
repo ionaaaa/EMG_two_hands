@@ -25,6 +25,7 @@ from emg_live_marker.realtime.student_observation import (
     STUDENT_GESTURES,
     StudentObservationService,
 )
+from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
 from emg_live_marker.ui.waveform_view import MultiChannelWaveformView
 
 
@@ -261,6 +262,67 @@ GESTURE_NAMES_ZH = {
     "open-palm": "伸掌",
     "pinch": "捏合",
 }
+
+
+class StudentQuickExperiencePage(QWidget):
+    """One-button entry to the locked standard-model web game experience."""
+
+    def __init__(
+        self,
+        service: StudentGameExperienceService,
+        go_home: Callable[[], None],
+    ) -> None:
+        super().__init__()
+        self.setObjectName("student-quick-experience-page")
+        self.service = service
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(64, 48, 64, 48)
+        layout.setSpacing(20)
+
+        title = QLabel("快速体验")
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        title.setStyleSheet("font-size: 28px; font-weight: 700;")
+        layout.addWidget(title)
+        description = QLabel(
+            "系统会自动检查手环、启动课程标准模型并打开本地游戏。\n"
+            "至少一只手环检查通过即可开始。"
+        )
+        description.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        description.setWordWrap(True)
+        description.setStyleSheet("font-size: 17px;")
+        layout.addWidget(description)
+
+        self.status_label = QLabel("点击按钮开始体验。")
+        self.status_label.setObjectName("student-quick-experience-status")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.status_label.setWordWrap(True)
+        self.status_label.setStyleSheet("font-size: 18px; font-weight: 600;")
+        layout.addWidget(self.status_label)
+        layout.addStretch(1)
+
+        self.start_button = QPushButton("使用标准模型开始体验")
+        self.start_button.setObjectName("start-standard-model-experience")
+        self.start_button.setMinimumHeight(58)
+        self.start_button.setStyleSheet("font-size: 20px; font-weight: 700;")
+        self.start_button.clicked.connect(self.service.start_experience)
+        layout.addWidget(self.start_button)
+
+        self.home_button = QPushButton("返回首页")
+        self.home_button.setObjectName("return-home-quick-experience")
+        self.home_button.clicked.connect(go_home)
+        layout.addWidget(self.home_button, alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.service.status_changed.connect(self.set_status)
+        self.set_status(self.service.state, self.service.message)
+
+    def set_status(self, state: str, message: str) -> None:
+        self.status_label.setText(message)
+        starting = state in {"checking", "starting", "waiting-client"}
+        self.start_button.setEnabled(not starting)
+        self.start_button.setText(
+            "重新打开游戏" if state == "running" else "使用标准模型开始体验"
+        )
+        color = "#137333" if state == "running" else "#b42318" if state == "error" else "#22577a"
+        self.status_label.setStyleSheet(f"font-size: 18px; font-weight: 600; color: {color};")
 
 
 class StudentSignalObservationPage(QWidget):
