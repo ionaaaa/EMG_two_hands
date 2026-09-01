@@ -151,9 +151,9 @@ class RealtimeGestureDecoder(QObject):
         self._candidate_gesture = None
         self._candidate_count = 0
 
-    def close(self) -> None:
+    def close(self, *, wait: bool = False) -> None:
         self.stop()
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._executor.shutdown(wait=wait, cancel_futures=True)
 
     def decode_window(self, window: np.ndarray) -> dict[str, Any]:
         if self._inference_lock is None:

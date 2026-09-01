@@ -1,8 +1,7 @@
 """Student-mode course navigation window.
 
-The student window intentionally stays separate from :mod:`main_window`: it is
-only a course shell and never starts hardware, collection, inference, training,
-or game services.
+The student window intentionally stays separate from :mod:`main_window` and
+only exposes the guided course features implemented for student mode.
 """
 
 from __future__ import annotations
@@ -31,13 +30,16 @@ from emg_live_marker.device.check_service import (
 )
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 from emg_live_marker.realtime.collection import CollectionController, CollectionPlan
+from emg_live_marker.realtime.student_observation import StudentObservationService
 from emg_live_marker.ui.student_pages import (
     COURSE_ENTRIES,
     CourseEntry,
     DeviceCheckPage,
     StudentCollectionPage,
+    StudentSignalObservationPage,
     create_collection_gate_page,
     create_course_page,
+    create_signal_observation_gate_page,
 )
 
 TEACHING_CONFIG_RELATIVE_PATH = Path("configs") / "teaching" / "yucai.json"
@@ -78,7 +80,7 @@ def load_yucai_course_config(paths: ProjectPaths | None = None) -> dict[str, Any
 
 
 class StudentMainWindow(QMainWindow):
-    """A Chinese course-navigation shell with no real-time business logic."""
+    """Chinese course navigation with isolated student-mode services."""
 
     def __init__(
         self,
@@ -109,6 +111,11 @@ class StudentMainWindow(QMainWindow):
         )
         self.collection_controller.state_changed.connect(self._on_collection_snapshot)
         self.collection_controller.finished.connect(self._on_collection_finished)
+        self.observation_service = StudentObservationService(
+            self.paths.project_root,
+            self.course_config,
+            parent=self,
+        )
         self.device_check_service.emg_packets_received.connect(self._on_device_emg_packets)
 
         self.setWindowTitle(f"{self.course['name']} - 学生模式")
@@ -131,12 +138,26 @@ class StudentMainWindow(QMainWindow):
                     self.show_home,
                 )
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(self.collection_page)
+            elif entry.identifier == "view-signals":
+                self.signal_observation_page = StudentSignalObservationPage(
+                    self.observation_service,
+                    self.show_home,
+                )
+                self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
+                    self.signal_observation_page
+                )
             else:
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
                     create_course_page(entry, self.show_home)
                 )
         self.collection_gate_page = create_collection_gate_page(self.show_home, self.open_device_check)
         self._collection_gate_index = self._stack.addWidget(self.collection_gate_page)
+        self.signal_observation_gate_page = create_signal_observation_gate_page(
+            self.show_home, self.open_device_check
+        )
+        self._signal_observation_gate_index = self._stack.addWidget(
+            self.signal_observation_gate_page
+        )
         self._on_device_check_result(self.session_device_result)
 
         self.show_home()
@@ -189,6 +210,14 @@ class StudentMainWindow(QMainWindow):
         if entry.identifier == "collect-gestures" and not self.session_device_result.collection_ready:
             self._stack.setCurrentIndex(self._collection_gate_index)
             return
+        if entry.identifier == "view-signals":
+            if not self.session_device_result.collection_ready:
+                self._stack.setCurrentIndex(self._signal_observation_gate_index)
+                return
+            self.signal_observation_page.start(
+                left_ready=self.session_device_result.left.ready_for_collection,
+                right_ready=self.session_device_result.right.ready_for_collection,
+            )
         self._stack.setCurrentIndex(self._entry_page_indexes[entry.identifier])
 
     def open_device_check(self) -> None:
@@ -204,9 +233,14 @@ class StudentMainWindow(QMainWindow):
             result.left.ready_for_collection,
             result.right.ready_for_collection,
         )
+        self.signal_observation_page.set_ready_sides(
+            result.left.ready_for_collection,
+            result.right.ready_for_collection,
+        )
         self.collection_controller.check_device_state()
 
     def _on_device_emg_packets(self, side: str, packets: list) -> None:
+        self.observation_service.on_emg_packets(side, packets)
         if side == self._collection_side:
             self.collection_controller.on_emg_packets(packets)
 
@@ -307,10 +341,12 @@ class StudentMainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 return
             self.collection_controller.end("partial")
+        self.signal_observation_page.stop()
         self._stack.setCurrentIndex(self._home_page_index)
 
     def closeEvent(self, event) -> None:
         if self.collection_controller.active:
             self.collection_controller.end("interrupted")
+        self.signal_observation_page.stop()
         self.device_check_service.close()
         super().closeEvent(event)

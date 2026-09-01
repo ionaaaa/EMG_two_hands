@@ -1,15 +1,11 @@
-"""Static course pages used by the student-mode window.
-
-These widgets deliberately provide course navigation only. They do not create
-devices, start collection, load models, or start game services.
-"""
+"""Course pages used by the student-mode window."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -24,6 +20,12 @@ from PySide6.QtWidgets import (
 )
 
 from emg_live_marker.device.check_service import ConnectionState, DeviceCheckResult
+from emg_live_marker.realtime.student_observation import (
+    STUDENT_DISPLAY_MODES,
+    STUDENT_GESTURES,
+    StudentObservationService,
+)
+from emg_live_marker.ui.waveform_view import MultiChannelWaveformView
 
 
 @dataclass(frozen=True)
@@ -219,6 +221,206 @@ def create_collection_gate_page(go_home: Callable[[], None], open_device_check: 
     back_button.clicked.connect(go_home)
     layout.addWidget(back_button, alignment=Qt.AlignmentFlag.AlignHCenter)
     return page
+
+
+def create_signal_observation_gate_page(
+    go_home: Callable[[], None], open_device_check: Callable[[], None]
+) -> QWidget:
+    """Require at least one checked hand before entering signal observation."""
+
+    page = QWidget()
+    page.setObjectName("student-signal-observation-gate-page")
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(48, 48, 48, 48)
+    layout.setSpacing(18)
+    title = QLabel("查看信号与识别结果")
+    title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    title.setStyleSheet("font-size: 28px; font-weight: 700;")
+    layout.addWidget(title)
+    message = QLabel("请先完成手环连接与信号检查，至少一只手环检查通过后即可观察。")
+    message.setObjectName("signal-observation-gate-message")
+    message.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+    message.setWordWrap(True)
+    message.setStyleSheet("font-size: 20px; font-weight: 600; color: #9a6700;")
+    layout.addWidget(message)
+    layout.addStretch(1)
+    check_button = QPushButton("前往检查手环")
+    check_button.setObjectName("open-device-check-from-observation-gate")
+    check_button.clicked.connect(open_device_check)
+    layout.addWidget(check_button, alignment=Qt.AlignmentFlag.AlignHCenter)
+    back_button = QPushButton("返回首页")
+    back_button.setObjectName("return-home-observation-gate")
+    back_button.clicked.connect(go_home)
+    layout.addWidget(back_button, alignment=Qt.AlignmentFlag.AlignHCenter)
+    return page
+
+
+GESTURE_NAMES_ZH = {
+    "rest": "放松",
+    "fist": "握拳",
+    "open-palm": "伸掌",
+    "pinch": "捏合",
+}
+
+
+class StudentSignalObservationPage(QWidget):
+    """Student-facing dual-hand waveform and real-model observation page."""
+
+    DISPLAY_MODE_LABELS = {
+        "raw": "原始肌电",
+        "filtered": "滤波肌电",
+        "rms": "肌肉活动强度（RMS）",
+    }
+
+    def __init__(
+        self,
+        service: StudentObservationService,
+        go_home: Callable[[], None],
+    ) -> None:
+        super().__init__()
+        self.setObjectName("student-signal-observation-page")
+        self.service = service
+        self._ready_sides = {"left": False, "right": False}
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(10)
+        title = QLabel("查看信号与识别结果")
+        title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        title.setStyleSheet("font-size: 25px; font-weight: 700;")
+        layout.addWidget(title)
+
+        prompt = QLabel("观察提示：请依次尝试 放松 → 握拳 → 伸掌，留意波形与识别结果的变化。")
+        prompt.setObjectName("signal-observation-prompt")
+        prompt.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        prompt.setStyleSheet("font-size: 16px; font-weight: 600; color: #22577a;")
+        layout.addWidget(prompt)
+
+        selector_row = QHBoxLayout()
+        selector_row.addWidget(QLabel("观察内容："))
+        self.display_mode_combo = QComboBox()
+        self.display_mode_combo.setObjectName("student-signal-display-mode")
+        for mode in STUDENT_DISPLAY_MODES:
+            self.display_mode_combo.addItem(self.DISPLAY_MODE_LABELS[mode], mode)
+        selector_row.addWidget(self.display_mode_combo)
+        selector_row.addStretch(1)
+        self.model_message_label = QLabel("")
+        self.model_message_label.setObjectName("student-observation-model-message")
+        self.model_message_label.setStyleSheet("color: #b42318; font-weight: 600;")
+        selector_row.addWidget(self.model_message_label)
+        layout.addLayout(selector_row)
+
+        hands = QHBoxLayout()
+        hands.setSpacing(12)
+        self.left_waveform_view, left_panel = self._build_hand_panel("left", "左手")
+        self.right_waveform_view, right_panel = self._build_hand_panel("right", "右手")
+        hands.addWidget(left_panel, 1)
+        hands.addWidget(right_panel, 1)
+        layout.addLayout(hands, 1)
+
+        self.home_button = QPushButton("返回首页")
+        self.home_button.setObjectName("return-home-view-signals")
+        self.home_button.clicked.connect(go_home)
+        layout.addWidget(self.home_button, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(50)
+        self._timer.timeout.connect(self.refresh_waveforms)
+        self.service.gesture_updated.connect(self._on_gesture_updated)
+        self.service.model_status_changed.connect(self.model_message_label.setText)
+
+    def _build_hand_panel(self, side: str, name: str) -> tuple[MultiChannelWaveformView, QWidget]:
+        panel = QWidget()
+        panel.setObjectName(f"student-observation-{side}-panel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(4)
+        header = QHBoxLayout()
+        hand_label = QLabel(name)
+        hand_label.setStyleSheet("font-size: 18px; font-weight: 700;")
+        status = QLabel("未连接")
+        status.setObjectName(f"student-observation-{side}-status")
+        status.setStyleSheet("font-weight: 600; color: #b42318;")
+        header.addWidget(hand_label)
+        header.addStretch(1)
+        header.addWidget(status)
+        panel_layout.addLayout(header)
+
+        result = QLabel("当前手势：--    置信度：--")
+        result.setObjectName(f"student-observation-{side}-result")
+        result.setStyleSheet("font-size: 15px; font-weight: 600;")
+        panel_layout.addWidget(result)
+        probabilities = QLabel(self._probability_text({}))
+        probabilities.setObjectName(f"student-observation-{side}-probabilities")
+        probabilities.setWordWrap(True)
+        panel_layout.addWidget(probabilities)
+        waveform = MultiChannelWaveformView(display_seconds=6.0)
+        waveform.setObjectName(f"student-observation-{side}-waveform")
+        panel_layout.addWidget(waveform, 1)
+
+        setattr(self, f"{side}_status_label", status)
+        setattr(self, f"{side}_result_label", result)
+        setattr(self, f"{side}_probability_label", probabilities)
+        return waveform, panel
+
+    def start(self, *, left_ready: bool, right_ready: bool) -> None:
+        self.set_ready_sides(left_ready, right_ready)
+        self.service.start(left_ready=left_ready, right_ready=right_ready)
+        self.model_message_label.setText(self.service.model_error)
+        self._timer.start()
+        self.refresh_waveforms()
+
+    def stop(self) -> None:
+        self._timer.stop()
+        self.service.stop()
+
+    def set_ready_sides(self, left_ready: bool, right_ready: bool) -> None:
+        self._ready_sides = {"left": bool(left_ready), "right": bool(right_ready)}
+        self.service.update_ready_sides(left_ready=left_ready, right_ready=right_ready)
+        for side, ready in self._ready_sides.items():
+            status = getattr(self, f"{side}_status_label")
+            status.setText("已连接" if ready else "未连接")
+            status.setStyleSheet(
+                "font-weight: 600; color: #137333;" if ready else "font-weight: 600; color: #b42318;"
+            )
+            if not ready:
+                getattr(self, f"{side}_result_label").setText("当前手势：--    置信度：--")
+                getattr(self, f"{side}_probability_label").setText(self._probability_text({}))
+                getattr(self, f"{side}_waveform_view").clear()
+
+    def refresh_waveforms(self) -> None:
+        mode = str(self.display_mode_combo.currentData())
+        for side, ready in self._ready_sides.items():
+            if not ready:
+                continue
+            t, data, sample_index = self.service.display_window(side, mode, seconds=6.0)
+            getattr(self, f"{side}_waveform_view").update_data(t, data, sample_index)
+
+    def _on_gesture_updated(
+        self, side: str, gesture: str, confidence: float, probabilities: dict[str, float]
+    ) -> None:
+        if not self._ready_sides.get(side, False):
+            return
+        name = GESTURE_NAMES_ZH.get(gesture, "未知")
+        getattr(self, f"{side}_result_label").setText(
+            f"当前手势：{name}    置信度：{float(confidence):.1%}"
+        )
+        getattr(self, f"{side}_probability_label").setText(self._probability_text(probabilities))
+
+    @staticmethod
+    def _probability_text(probabilities: dict[str, float]) -> str:
+        aliases = {
+            "rest": ("rest",),
+            "fist": ("fist",),
+            "open-palm": ("open-palm", "open_palm", "finger_spread"),
+            "pinch": ("pinch", "thumb_index_pinch"),
+        }
+        parts = []
+        for gesture in STUDENT_GESTURES:
+            value = next((probabilities[key] for key in aliases[gesture] if key in probabilities), None)
+            shown = "--" if value is None else f"{float(value):.1%}"
+            parts.append(f"{GESTURE_NAMES_ZH[gesture]} {shown}")
+        return "  |  ".join(parts)
 
 
 class StudentCollectionPage(QWidget):
