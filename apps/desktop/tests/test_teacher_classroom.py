@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QDockWidget
 from emg_live_marker.device.check_service import AssignedSerialDeviceProvider
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 from emg_live_marker.realtime.game_mapping import GameMappingService
-from emg_live_marker.realtime.classroom_storage import ClassroomStorage
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage, default_app_data_root
 from emg_live_marker.realtime.student_personal_training import StudentPersonalTrainingService
 from emg_live_marker.realtime.teacher_classroom import (
     TeacherClassroomService,
@@ -175,6 +175,66 @@ def test_default_teacher_settings_use_application_specific_directory() -> None:
     path = default_classroom_settings_path()
     assert path.name == "classroom_settings.json"
     assert path.parent.name == "EMGTwoHands"
+
+
+def test_machine_app_data_root_is_stable_across_qapplication_and_windows_services(
+    tmp_path, monkeypatch
+) -> None:
+    local_app_data = tmp_path / "local-app-data"
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    canonical_root = local_app_data / "EMGTwoHands"
+    canonical_root.mkdir(parents=True)
+    (canonical_root / "classroom_settings.json").write_text(
+        json.dumps(
+            {
+                "signal_processing": {"notch": "50+100Hz"},
+                "display": {"y_range": "+/-500 uV"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    legacy_root = local_app_data / "python" / "EMGTwoHands"
+    legacy_root.mkdir(parents=True)
+    legacy_original = json.dumps(
+        {
+            "signal_processing": {"notch": "50Hz"},
+            "display": {"y_range": "+/-2000 uV"},
+        }
+    )
+    (legacy_root / "classroom_settings.json").write_text(legacy_original, encoding="utf-8")
+
+    standalone_root = default_app_data_root()
+    QApplication.instance() or QApplication([])
+    after_qapplication_root = default_app_data_root()
+    assert standalone_root == after_qapplication_root == canonical_root
+    assert "python" not in [part.casefold() for part in canonical_root.parts]
+    assert default_classroom_settings_path() == canonical_root / "classroom_settings.json"
+
+    paths = resolve_project_paths()
+    standalone_service = TeacherClassroomService(paths, base_config())
+    assert standalone_service.settings_path == canonical_root / "classroom_settings.json"
+    assert standalone_service.signal_processing == {"notch": "50+100Hz"}
+    assert standalone_service.display_settings == {"y_range": "+/-500 uV"}
+
+    monkeypatch.setattr(MainWindow, "_load_game_model", lambda _self: None)
+    teacher_window = MainWindow(simulate=False, paths=paths)
+    student_window = StudentMainWindow(paths=paths)
+    try:
+        assert teacher_window._teacher_classroom_service.settings_path == standalone_service.settings_path
+        assert teacher_window._notch_combo.currentText() == "50+100Hz"
+        assert teacher_window._y_range_combo.currentText() == "+/-500 uV"
+        assert student_window.bracelet_assignment is None
+        assert student_window.signal_processing == {"notch": "50+100Hz"}
+        assert student_window.display_settings == {"y_range": "+/-500 uV"}
+        teacher_window._set_notch("60Hz")
+        teacher_window._set_y_range("+/-1000 uV")
+        persisted = json.loads((canonical_root / "classroom_settings.json").read_text(encoding="utf-8"))
+        assert persisted["signal_processing"] == {"notch": "60Hz"}
+        assert persisted["display"] == {"y_range": "+/-1000 uV"}
+        assert (legacy_root / "classroom_settings.json").read_text(encoding="utf-8") == legacy_original
+    finally:
+        teacher_window.close()
+        student_window.close()
 
 
 def test_student_config_loader_applies_classroom_override(tmp_path) -> None:

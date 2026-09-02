@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,12 +32,26 @@ class ClassroomGroupPaths:
 
 
 def default_app_data_root() -> Path:
-    """Return an application-specific directory, never the LocalAppData root itself."""
+    """Return one stable machine-local root, independent of QApplication metadata.
 
-    base = Path(
-        QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
+    ``AppLocalDataLocation`` incorporates Qt's application name, which means
+    a standalone Python helper and the desktop window may resolve different
+    directories (for example ``Local`` versus ``Local/python``).  The generic
+    user-data base is application-independent; Windows additionally prefers
+    ``LOCALAPPDATA`` so it consistently matches the expected local profile.
+    """
+
+    if sys.platform.startswith("win"):
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            return Path(local_app_data).expanduser() / "EMGTwoHands"
+
+    generic_base = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.GenericDataLocation
     )
-    return base if base.name.casefold() == "emgtwohands" else base / "EMGTwoHands"
+    if generic_base:
+        return Path(generic_base).expanduser() / "EMGTwoHands"
+    return Path.home() / ".local" / "share" / "EMGTwoHands"
 
 
 class ClassroomStorage:
