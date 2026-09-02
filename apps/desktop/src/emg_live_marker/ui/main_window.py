@@ -352,6 +352,8 @@ class MainWindow(QMainWindow):
         self._refresh_ports_button.clicked.connect(self._refresh_ports)
         self._port_combo.currentTextChanged.connect(self._sync_classroom_device_status)
         self._right_port_combo.currentTextChanged.connect(self._sync_classroom_device_status)
+        self._port_combo.currentTextChanged.connect(self._persist_bracelet_assignment)
+        self._right_port_combo.currentTextChanged.connect(self._persist_bracelet_assignment)
         self._connect_button.clicked.connect(self._connect)
         self._disconnect_button.clicked.connect(self._disconnect)
         self._connect_right_button.clicked.connect(self._connect_right)
@@ -876,21 +878,25 @@ class MainWindow(QMainWindow):
         current_right = self._right_port_combo.currentText().strip()
         ports = list_serial_ports()
         invalid_sides: list[str] = []
-        for combo, current, side in [
-            (self._port_combo, current_left, "left"),
-            (self._right_port_combo, current_right, "right"),
-        ]:
-            combo.clear()
-            combo.addItems(ports)
-            if current and current in ports:
-                combo.setCurrentText(current)
-            elif current:
-                combo.setCurrentIndex(-1)
-                combo.setEditText("")
-                invalid_sides.append(side)
-            else:
-                combo.setCurrentIndex(-1)
-                combo.setEditText("")
+        self._refreshing_ports = True
+        try:
+            for combo, current, side in [
+                (self._port_combo, current_left, "left"),
+                (self._right_port_combo, current_right, "right"),
+            ]:
+                combo.clear()
+                combo.addItems(ports)
+                if current and current in ports:
+                    combo.setCurrentText(current)
+                elif current:
+                    combo.setCurrentIndex(-1)
+                    combo.setEditText("")
+                    invalid_sides.append(side)
+                else:
+                    combo.setCurrentIndex(-1)
+                    combo.setEditText("")
+        finally:
+            self._refreshing_ports = False
         if invalid_sides:
             names = "、".join("左手" if side == "left" else "右手" for side in invalid_sides)
             self.statusBar().showMessage(f"{names}当前选择的端口已不存在，已清除选择。", 5000)
@@ -902,6 +908,20 @@ class MainWindow(QMainWindow):
         dock = getattr(self, "_classroom_dock", None)
         if dock is not None:
             dock.sync_device_status()
+
+    def _persist_bracelet_assignment(self, *_args: object) -> None:
+        """Persist only a complete, distinct Left/Right selection for student mode."""
+
+        service = getattr(self, "_teacher_classroom_service", None)
+        if service is None or getattr(self, "_refreshing_ports", False):
+            return
+        left_port = self._port_combo.currentText().strip()
+        right_port = self._right_port_combo.currentText().strip()
+        if not left_port or not right_port:
+            return
+        saved, _message = service.save_bracelet_assignment(left_port, right_port)
+        if not saved and left_port == right_port:
+            self.statusBar().showMessage("左右手不能使用同一个端口，请重新选择。", 5000)
 
     def _connect(self) -> None:
         self._reset_data_streams(clear_raw=True)
@@ -1069,6 +1089,7 @@ class MainWindow(QMainWindow):
             3000,
         )
         self._set_connected_ui_for_side(side, True)
+        self._persist_bracelet_assignment()
 
     def _on_serial_disconnected_for_side(self, side: BraceletSide) -> None:
         runtime = self._runtimes[side]

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from emg_live_marker.device.check_service import (
+    AssignedSerialDeviceProvider,
     DeviceCheckResult,
     DeviceCheckService,
     DeviceCheckThresholds,
@@ -36,7 +37,10 @@ from emg_live_marker.realtime.student_game_experience import StudentGameExperien
 from emg_live_marker.realtime.student_observation import StudentObservationService
 from emg_live_marker.realtime.student_control_optimization import StudentControlEffectTestService
 from emg_live_marker.realtime.student_competition import StudentCompetitionService
-from emg_live_marker.realtime.teacher_classroom import merge_classroom_overrides
+from emg_live_marker.realtime.teacher_classroom import (
+    load_bracelet_assignment,
+    merge_classroom_overrides,
+)
 from emg_live_marker.realtime.student_personal_training import StudentPersonalTrainingService
 from emg_live_marker.ui.student_pages import (
     COURSE_ENTRIES,
@@ -127,7 +131,17 @@ class StudentMainWindow(QMainWindow):
         self.course_entries = COURSE_ENTRIES
         self.course_entry_buttons: list[QPushButton] = []
         self._entry_page_indexes: dict[str, int] = {}
+        self.bracelet_assignment = load_bracelet_assignment(classroom_settings_path)
+        assigned_provider = (
+            AssignedSerialDeviceProvider(
+                self.bracelet_assignment["left_port"],
+                self.bracelet_assignment["right_port"],
+            )
+            if self.bracelet_assignment is not None
+            else None
+        )
         self.device_check_service = device_check_service or DeviceCheckService(
+            provider=assigned_provider,
             thresholds=DeviceCheckThresholds.from_config(self.course_config),
             simulate=simulate,
             parent=self,

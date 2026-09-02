@@ -10,6 +10,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from emg_live_marker.device.check_service import (
+    AssignedSerialDeviceProvider,
     CheckReason,
     ConnectionState,
     DeviceCheckResult,
@@ -105,6 +106,29 @@ def run_check(
     return service, sources
 
 
+def run_assigned_check(
+    app: QApplication,
+    thresholds: DeviceCheckThresholds,
+    provider: AssignedSerialDeviceProvider,
+) -> tuple[DeviceCheckService, list[FakeSource]]:
+    sources: list[FakeSource] = []
+
+    def source_factory(_descriptor: DeviceDescriptor, side: str, parent: QObject) -> FakeSource:
+        source = FakeSource(healthy_packets(), [250.0], parent)
+        sources.append(source)
+        return source
+
+    service = DeviceCheckService(
+        provider=provider,
+        source_factory=source_factory,
+        thresholds=thresholds,
+    )
+    service.start()
+    QTest.qWait(thresholds.observe_duration_ms + 150)
+    app.processEvents()
+    return service, sources
+
+
 def test_no_device_returns_clear_no_device_result(app, thresholds) -> None:
     service, _ = run_check(app, thresholds, [])
     try:
@@ -151,6 +175,51 @@ def test_unassigned_devices_are_not_silently_mapped(app, thresholds) -> None:
         assert service.result.left.connection is ConnectionState.UNASSIGNED
         assert "无法确认左右手" in service.result.message
         assert service.result.collection_ready is False
+    finally:
+        service.close()
+
+
+def test_assigned_provider_keeps_left_right_when_enumeration_order_changes() -> None:
+    provider = AssignedSerialDeviceProvider(
+        "COM6",
+        "COM7",
+        port_lister=lambda: ["COM13", "COM7", "COM12", "COM6"],
+    )
+    assert provider.list_devices() == (
+        DeviceDescriptor("COM6", "left"),
+        DeviceDescriptor("COM7", "right"),
+    )
+
+
+def test_assigned_provider_ignores_unassigned_ports_and_allows_one_ready_side(app, thresholds) -> None:
+    provider = AssignedSerialDeviceProvider(
+        "COM6",
+        "COM7",
+        port_lister=lambda: ["COM12", "COM6", "COM13"],
+    )
+    service, sources = run_assigned_check(app, thresholds, provider)
+    try:
+        assert [source for source in sources]
+        assert service.result.left.reason is CheckReason.HEALTHY
+        assert service.result.right.reason is CheckReason.NO_DEVICE
+        assert service.result.collection_ready is True
+        assert set(service._descriptors) == {"left"}
+    finally:
+        service.close()
+
+
+def test_missing_assigned_ports_shows_teacher_facing_message(app, thresholds) -> None:
+    provider = AssignedSerialDeviceProvider(
+        "COM6",
+        "COM7",
+        port_lister=lambda: ["COM12", "COM13"],
+    )
+    service, sources = run_assigned_check(app, thresholds, provider)
+    try:
+        assert not sources
+        assert service.result.left.reason is CheckReason.NO_DEVICE
+        assert service.result.right.reason is CheckReason.NO_DEVICE
+        assert service.result.message == "未检测到已分配手环，请老师检查连接"
     finally:
         service.close()
 

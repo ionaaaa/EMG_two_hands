@@ -34,6 +34,32 @@ def default_classroom_settings_path() -> Path:
     return default_app_data_root() / "classroom_settings.json"
 
 
+def bracelet_assignment_from_settings(payload: object) -> dict[str, str] | None:
+    """Return a complete, non-ambiguous machine-local bracelet assignment."""
+
+    if not isinstance(payload, dict):
+        return None
+    assignment = payload.get("bracelet_assignment")
+    if not isinstance(assignment, dict):
+        return None
+    left_port = str(assignment.get("left_port", "")).strip()
+    right_port = str(assignment.get("right_port", "")).strip()
+    if not left_port or not right_port or left_port == right_port:
+        return None
+    return {"left_port": left_port, "right_port": right_port}
+
+
+def load_bracelet_assignment(settings_path: Path | None = None) -> dict[str, str] | None:
+    """Read only the machine-level left/right port mapping, never course JSON."""
+
+    path = Path(settings_path or default_classroom_settings_path())
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    return bracelet_assignment_from_settings(payload)
+
+
 def merge_classroom_overrides(
     course_config: dict[str, Any],
     project_root: Path,
@@ -133,6 +159,7 @@ class TeacherClassroomService(QObject):
         )
         self._model_loader = model_loader or load_model
         self._base_settings = self._settings_from_course(course_config)
+        self.bracelet_assignment: dict[str, str] | None = None
         self.settings = self.load_settings()
 
     def load_settings(self) -> ClassroomSettings:
@@ -147,6 +174,7 @@ class TeacherClassroomService(QObject):
         except (FileNotFoundError, OSError, json.JSONDecodeError):
             payload = {}
         password_enabled = bool(payload.get("teacher_password_enabled", False)) if isinstance(payload, dict) else False
+        self.bracelet_assignment = bracelet_assignment_from_settings(payload)
         self.settings = ClassroomSettings(
             settings.standard_model_path,
             settings.trials_per_action,
@@ -154,6 +182,29 @@ class TeacherClassroomService(QObject):
             password_enabled,
         )
         return self.settings
+
+    def save_bracelet_assignment(
+        self, left_port: str, right_port: str
+    ) -> tuple[bool, str]:
+        left = str(left_port).strip()
+        right = str(right_port).strip()
+        if not left or not right:
+            return False, "请先为左右手分别选择端口后再保存分配。"
+        if left == right:
+            return False, "左右手不能使用同一个端口。"
+        payload = self._read_settings_payload()
+        payload["bracelet_assignment"] = {
+            "left_port": left,
+            "right_port": right,
+        }
+        payload.setdefault("schema_version", 1)
+        try:
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            self._write_json(self.settings_path, payload)
+        except OSError:
+            return False, "左右手环分配保存失败，请检查应用数据目录。"
+        self.bracelet_assignment = dict(payload["bracelet_assignment"])
+        return True, "左右手环分配已保存。"
 
     @property
     def configured_standard_model_path(self) -> Path | None:
@@ -177,13 +228,14 @@ class TeacherClassroomService(QObject):
             stored_path = str(model_path.relative_to(self.paths.project_root))
         except ValueError:
             stored_path = str(model_path)
-        payload = {
+        payload = self._read_settings_payload()
+        payload.update({
             "schema_version": 1,
             "standard_model_path": stored_path.replace("\\", "/"),
             "trials_per_action": int(trials_per_action),
             "personal_training_enabled": bool(personal_training_enabled),
             "teacher_password_enabled": bool(teacher_password_enabled),
-        }
+        })
         try:
             self.settings_path.parent.mkdir(parents=True, exist_ok=True)
             self._write_json(self.settings_path, payload)
@@ -496,6 +548,13 @@ class TeacherClassroomService(QObject):
             trials_per_action=int(collection.get("trials_per_action", 10)),
             personal_training_enabled=bool(training.get("enabled", True)),
         )
+
+    def _read_settings_payload(self) -> dict[str, Any]:
+        try:
+            payload = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return {}
+        return dict(payload) if isinstance(payload, dict) else {}
 
     def _resolve_setting_model_path(self, value: str) -> Path | None:
         if not value:

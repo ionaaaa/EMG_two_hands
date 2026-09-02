@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QApplication, QDockWidget
 
+from emg_live_marker.device.check_service import AssignedSerialDeviceProvider
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.classroom_storage import ClassroomStorage
@@ -18,6 +19,7 @@ from emg_live_marker.realtime.student_personal_training import StudentPersonalTr
 from emg_live_marker.realtime.teacher_classroom import (
     TeacherClassroomService,
     default_classroom_settings_path,
+    load_bracelet_assignment,
     merge_classroom_overrides,
 )
 from emg_live_marker.ui.main_window import MainWindow
@@ -94,6 +96,52 @@ def test_classroom_settings_persist_outside_yucai_and_merge_into_student_config(
     assert Path(merged["realtime_decoding"]["standard_teaching_model_path"]) == model.resolve()
     assert merged["collection"]["trials_per_action"] == 12
     assert merged["personal_training"]["enabled"] is False
+
+
+def test_bracelet_assignment_is_machine_local_and_survives_settings_save(tmp_path) -> None:
+    settings_path = tmp_path / "app-data" / "classroom_settings.json"
+    service, _paths, _config, model = make_service(tmp_path, settings_path=settings_path)
+    assert service.save_bracelet_assignment("COM6", "COM7")[0]
+    assert load_bracelet_assignment(settings_path) == {
+        "left_port": "COM6",
+        "right_port": "COM7",
+    }
+    assert service.save_settings(
+        standard_model_path=model,
+        trials_per_action=15,
+        personal_training_enabled=True,
+    )[0]
+    payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["bracelet_assignment"] == {
+        "left_port": "COM6",
+        "right_port": "COM7",
+    }
+
+
+def test_bracelet_assignment_rejects_same_or_empty_port(tmp_path) -> None:
+    service, _paths, _config, _model = make_service(tmp_path)
+    assert service.save_bracelet_assignment("COM6", "COM6")[0] is False
+    assert "不能使用同一个端口" in service.save_bracelet_assignment("COM6", "COM6")[1]
+    assert service.save_bracelet_assignment("", "COM7")[0] is False
+    assert service.bracelet_assignment is None
+
+
+def test_student_window_uses_saved_machine_bracelet_assignment(app, tmp_path) -> None:
+    settings_path = tmp_path / "app-data" / "classroom_settings.json"
+    service, _paths, _config, _model = make_service(tmp_path, settings_path=settings_path)
+    assert service.save_bracelet_assignment("COM6", "COM7")[0]
+
+    window = StudentMainWindow(
+        paths=resolve_project_paths(),
+        classroom_settings_path=settings_path,
+    )
+    try:
+        provider = window.device_check_service.provider
+        assert isinstance(provider, AssignedSerialDeviceProvider)
+        assert provider.left_port == "COM6"
+        assert provider.right_port == "COM7"
+    finally:
+        window.close()
 
 
 def test_default_teacher_settings_use_application_specific_directory() -> None:
@@ -343,13 +391,21 @@ def test_classroom_dock_is_read_only_mirror_of_mainwindow_device_controls(app) -
 
 def test_classroom_device_status_tracks_mainwindow_ports_connections_and_refresh(app, monkeypatch) -> None:
     ports = ["COM6", "COM12", "COM13"]
+    saved_assignments: list[tuple[str, str]] = []
+
+    def save_assignment(_service, left_port: str, right_port: str) -> tuple[bool, str]:
+        saved_assignments.append((left_port, right_port))
+        return True, ""
+
     monkeypatch.setattr(main_window_module, "list_serial_ports", lambda: list(ports))
     monkeypatch.setattr(MainWindow, "_load_game_model", lambda _self: None)
+    monkeypatch.setattr(TeacherClassroomService, "save_bracelet_assignment", save_assignment)
     window = MainWindow(simulate=False, paths=resolve_project_paths())
     try:
         dock = window._classroom_dock
         window._port_combo.setCurrentText("COM6")
         window._right_port_combo.setCurrentText("COM13")
+        assert saved_assignments[-1] == ("COM6", "COM13")
         assert dock.left_device_status_label.text() == "COM6 · 未连接"
         assert dock.right_device_status_label.text() == "COM13 · 未连接"
 
@@ -362,6 +418,7 @@ def test_classroom_device_status_tracks_mainwindow_ports_connections_and_refresh
 
         window._set_connected_ui_for_side("left", False)
         ports[:] = ["COM6", "COM7"]
+        save_count_before_refresh = len(saved_assignments)
         window._refresh_ports_button.click()
 
         assert [window._port_combo.itemText(index) for index in range(window._port_combo.count())] == ports
@@ -370,11 +427,15 @@ def test_classroom_device_status_tracks_mainwindow_ports_connections_and_refresh
         assert dock.left_device_status_label.text() == "COM6 · 未连接"
         assert window._right_port_combo.currentText() == ""
         assert dock.right_device_status_label.text() == "未选择端口 · 未连接"
+        assert len(saved_assignments) == save_count_before_refresh
 
         window._right_port_combo.setCurrentText("COM7")
+        assert saved_assignments[-1] == ("COM6", "COM7")
+        save_count_before_dock_refresh = len(saved_assignments)
         assert dock.right_device_status_label.text() == "COM7 · 未连接"
         dock.refresh_ports_button.click()
         assert window._right_port_combo.currentText() == "COM7"
+        assert len(saved_assignments) == save_count_before_dock_refresh
         assert "主窗口 Left / Right" in dock.ports_message.text()
     finally:
         window.close()

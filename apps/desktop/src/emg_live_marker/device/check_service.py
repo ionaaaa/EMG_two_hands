@@ -67,6 +67,34 @@ class SerialDeviceProvider:
         return [DeviceDescriptor(port=port) for port in list_serial_ports()]
 
 
+class AssignedSerialDeviceProvider:
+    """Enumerate only teacher-assigned ports, preserving explicit left/right sides."""
+
+    def __init__(
+        self,
+        left_port: str,
+        right_port: str,
+        *,
+        port_lister: Callable[[], Sequence[str]] = list_serial_ports,
+    ) -> None:
+        self.left_port = str(left_port).strip()
+        self.right_port = str(right_port).strip()
+        self._port_lister = port_lister
+        self.assignment_configured = bool(
+            self.left_port and self.right_port and self.left_port != self.right_port
+        )
+
+    def list_devices(self) -> Sequence[DeviceDescriptor]:
+        if not self.assignment_configured:
+            return ()
+        available = {str(port).strip() for port in self._port_lister()}
+        return tuple(
+            DeviceDescriptor(port=port, side=side)
+            for side, port in (("left", self.left_port), ("right", self.right_port))
+            if port in available
+        )
+
+
 @dataclass(frozen=True)
 class DeviceCheckThresholds:
     observe_duration_ms: int = 1500
@@ -272,7 +300,13 @@ class DeviceCheckService(QObject):
             assigned_ports.add(descriptor.port)
 
         if not assigned:
-            self._finish_check()
+            assigned_provider = isinstance(self.provider, AssignedSerialDeviceProvider)
+            message = (
+                "未检测到已分配手环，请老师检查连接"
+                if assigned_provider and self.provider.assignment_configured
+                else None
+            )
+            self._finish_check(message=message)
             return
         self._descriptors = assigned
         for side, descriptor in assigned.items():
