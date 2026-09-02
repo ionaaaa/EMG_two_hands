@@ -292,6 +292,8 @@ class MainWindow(QMainWindow):
             self._connect()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        # Keep the explicit hardware assignment available to the next student-mode run.
+        self._persist_bracelet_assignment_if_complete()
         self._game_decoder.close()
         self._right_game_decoder.close()
         self._dual_game_mapper.release_all()
@@ -352,8 +354,8 @@ class MainWindow(QMainWindow):
         self._refresh_ports_button.clicked.connect(self._refresh_ports)
         self._port_combo.currentTextChanged.connect(self._sync_classroom_device_status)
         self._right_port_combo.currentTextChanged.connect(self._sync_classroom_device_status)
-        self._port_combo.currentTextChanged.connect(self._persist_bracelet_assignment)
-        self._right_port_combo.currentTextChanged.connect(self._persist_bracelet_assignment)
+        self._port_combo.currentTextChanged.connect(self._persist_bracelet_assignment_if_complete)
+        self._right_port_combo.currentTextChanged.connect(self._persist_bracelet_assignment_if_complete)
         self._connect_button.clicked.connect(self._connect)
         self._disconnect_button.clicked.connect(self._disconnect)
         self._connect_right_button.clicked.connect(self._connect_right)
@@ -909,8 +911,8 @@ class MainWindow(QMainWindow):
         if dock is not None:
             dock.sync_device_status()
 
-    def _persist_bracelet_assignment(self, *_args: object) -> None:
-        """Persist only a complete, distinct Left/Right selection for student mode."""
+    def _persist_bracelet_assignment_if_complete(self, *_args: object) -> None:
+        """Persist a complete teacher-selected Left/Right assignment for student mode."""
 
         service = getattr(self, "_teacher_classroom_service", None)
         if service is None or getattr(self, "_refreshing_ports", False):
@@ -919,9 +921,9 @@ class MainWindow(QMainWindow):
         right_port = self._right_port_combo.currentText().strip()
         if not left_port or not right_port:
             return
-        saved, _message = service.save_bracelet_assignment(left_port, right_port)
-        if not saved and left_port == right_port:
-            self.statusBar().showMessage("左右手不能使用同一个端口，请重新选择。", 5000)
+        saved, message = service.save_bracelet_assignment(left_port, right_port)
+        if not saved:
+            self.statusBar().showMessage(message or "左右手环分配保存失败。", 5000)
 
     def _connect(self) -> None:
         self._reset_data_streams(clear_raw=True)
@@ -1089,7 +1091,7 @@ class MainWindow(QMainWindow):
             3000,
         )
         self._set_connected_ui_for_side(side, True)
-        self._persist_bracelet_assignment()
+        self._persist_bracelet_assignment_if_complete()
 
     def _on_serial_disconnected_for_side(self, side: BraceletSide) -> None:
         runtime = self._runtimes[side]

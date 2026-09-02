@@ -441,6 +441,40 @@ def test_classroom_device_status_tracks_mainwindow_ports_connections_and_refresh
         window.close()
 
 
+def test_mainwindow_persists_complete_assignment_after_connections_and_on_close(app, monkeypatch) -> None:
+    saved_assignments: list[tuple[str, str]] = []
+
+    def save_assignment(_service, left_port: str, right_port: str) -> tuple[bool, str]:
+        saved_assignments.append((left_port, right_port))
+        if left_port == right_port:
+            return False, "左右手不能使用同一个端口。"
+        return True, ""
+
+    monkeypatch.setattr(main_window_module, "list_serial_ports", lambda: ["COM6", "COM7"])
+    monkeypatch.setattr(MainWindow, "_load_game_model", lambda _self: None)
+    monkeypatch.setattr(TeacherClassroomService, "save_bracelet_assignment", save_assignment)
+    window = MainWindow(simulate=False, paths=resolve_project_paths())
+    try:
+        window._port_combo.setCurrentText("COM6")
+        window._right_port_combo.setCurrentText("COM7")
+        assert saved_assignments[-1] == ("COM6", "COM7")
+
+        saved_assignments.clear()
+        window._on_serial_connected_for_side("left", "COM6")
+        assert saved_assignments == [("COM6", "COM7")]
+        window._on_serial_connected_for_side("right", "COM7")
+        assert saved_assignments == [("COM6", "COM7"), ("COM6", "COM7")]
+
+        window._port_combo.setCurrentText("COM7")
+        assert window.statusBar().currentMessage() == "左右手不能使用同一个端口。"
+        window._port_combo.setCurrentText("COM6")
+        saved_assignments.clear()
+    finally:
+        window.close()
+
+    assert saved_assignments == [("COM6", "COM7")]
+
+
 def test_student_next_group_reset_restores_defaults_without_deleting_artifacts(app, tmp_path) -> None:
     artifact = tmp_path / "keep.json"
     artifact.write_text("{}", encoding="utf-8")
