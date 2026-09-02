@@ -350,6 +350,8 @@ class MainWindow(QMainWindow):
         self._send_rest_button = QPushButton("Rest")
 
         self._refresh_ports_button.clicked.connect(self._refresh_ports)
+        self._port_combo.currentTextChanged.connect(self._sync_classroom_device_status)
+        self._right_port_combo.currentTextChanged.connect(self._sync_classroom_device_status)
         self._connect_button.clicked.connect(self._connect)
         self._disconnect_button.clicked.connect(self._disconnect)
         self._connect_right_button.clicked.connect(self._connect_right)
@@ -499,7 +501,7 @@ class MainWindow(QMainWindow):
         port_layout = QHBoxLayout(port_row)
         port_layout.setContentsMargins(0, 0, 0, 0)
         port_layout.setSpacing(8)
-        port_label = QLabel("Port")
+        port_label = QLabel("Left")
         port_label.setMinimumWidth(42)
         port_layout.addWidget(port_label)
         port_layout.addWidget(self._port_combo, 1)
@@ -896,6 +898,11 @@ class MainWindow(QMainWindow):
         if dock is not None:
             dock.sync_port_candidates(ports)
 
+    def _sync_classroom_device_status(self, *_args: object) -> None:
+        dock = getattr(self, "_classroom_dock", None)
+        if dock is not None:
+            dock.sync_device_status()
+
     def _connect(self) -> None:
         self._reset_data_streams(clear_raw=True)
         if self._simulate_checkbox.isChecked():
@@ -1110,6 +1117,7 @@ class MainWindow(QMainWindow):
         )
         self._update_waveform_visibility()
         self._publish_hand_status(side)
+        self._sync_classroom_device_status()
 
     def _sync_source_aliases(self) -> None:
         self._simulator = self._runtimes["left"].simulator

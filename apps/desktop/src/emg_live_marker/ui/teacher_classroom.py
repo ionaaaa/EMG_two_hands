@@ -73,26 +73,20 @@ class TeacherClassroomDock(QDockWidget):
         self.settings_message.setWordWrap(True)
         layout.addWidget(self.settings_message)
 
-        assignment = QGridLayout()
-        assignment.addWidget(QLabel("左手手环端口"), 0, 0)
-        self.left_port_combo = QComboBox()
-        self.left_assign_button = QPushButton("分配并连接左手")
-        assignment.addWidget(self.left_port_combo, 0, 1)
-        assignment.addWidget(self.left_assign_button, 0, 2)
-        assignment.addWidget(QLabel("右手手环端口"), 1, 0)
-        self.right_port_combo = QComboBox()
-        self.right_assign_button = QPushButton("分配并连接右手")
-        assignment.addWidget(self.right_port_combo, 1, 1)
-        assignment.addWidget(self.right_assign_button, 1, 2)
-        self.left_assign_button.clicked.connect(lambda: self._assign_port("left"))
-        self.right_assign_button.clicked.connect(lambda: self._assign_port("right"))
-        layout.addLayout(assignment)
+        device_status = QGridLayout()
+        device_status.addWidget(QLabel("左手环"), 0, 0)
+        self.left_device_status_label = QLabel()
+        device_status.addWidget(self.left_device_status_label, 0, 1)
+        device_status.addWidget(QLabel("右手环"), 1, 0)
+        self.right_device_status_label = QLabel()
+        device_status.addWidget(self.right_device_status_label, 1, 1)
+        layout.addLayout(device_status)
         self.ports_message = QLabel("")
         self.ports_message.setWordWrap(True)
         layout.addWidget(self.ports_message)
-        refresh_ports = QPushButton("刷新端口")
-        refresh_ports.clicked.connect(self.refresh_ports)
-        layout.addWidget(refresh_ports)
+        self.refresh_ports_button = QPushButton("刷新端口")
+        self.refresh_ports_button.clicked.connect(self.refresh_ports)
+        layout.addWidget(self.refresh_ports_button)
 
         self.next_group_button = QPushButton("准备下一组学生")
         self.next_group_button.clicked.connect(self._prepare_next_group)
@@ -202,35 +196,27 @@ class TeacherClassroomDock(QDockWidget):
 
     def refresh_ports(self) -> None:
         self.main_window._refresh_ports()
-        # MainWindow performs the scan and calls sync_port_candidates(), so this
-        # method never creates a second serial discovery or connection path.
+        self.ports_message.setText("端口候选已刷新，请在主窗口 Left / Right 中选择并连接手环。")
 
-    def sync_port_candidates(self, ports: list[str]) -> None:
-        """Mirror MainWindow's latest port scan while retaining only valid choices."""
+    def sync_port_candidates(self, _ports: list[str]) -> None:
+        """Refresh the read-only mirror after MainWindow's existing port scan."""
 
-        invalid_sides: list[str] = []
-        for source, target in (
-            (self.main_window._port_combo, self.left_port_combo),
-            (self.main_window._right_port_combo, self.right_port_combo),
-        ):
-            current = target.currentText()
-            target.clear()
-            target.addItems(ports)
-            if current and current in ports:
-                target.setCurrentText(current)
-            elif current:
-                target.setCurrentIndex(-1)
-                target.setEditText("")
-                invalid_sides.append("左手" if target is self.left_port_combo else "右手")
-            else:
-                target.setCurrentIndex(-1)
-                target.setEditText("")
-        if invalid_sides:
-            self.ports_message.setText(
-                f"{'、'.join(invalid_sides)}当前选择的端口已不存在，已清除选择。"
-            )
-        else:
-            self.ports_message.setText("")
+        self.sync_device_status()
+
+    def sync_device_status(self) -> None:
+        """Display MainWindow's sole port-selection and connection state."""
+
+        self.left_device_status_label.setText(
+            self._device_status_text("left", self.main_window._port_combo.currentText())
+        )
+        self.right_device_status_label.setText(
+            self._device_status_text("right", self.main_window._right_port_combo.currentText())
+        )
+
+    def _device_status_text(self, side: str, port: str) -> str:
+        selected_port = str(port).strip() or "未选择端口"
+        connected = bool(self.main_window._runtimes[side].connected)
+        return f"{selected_port} · {'已连接' if connected else '未连接'}"
 
     def refresh_sessions(self) -> None:
         sessions = self.service.scan_sessions()
@@ -306,21 +292,6 @@ class TeacherClassroomDock(QDockWidget):
             teacher_password_enabled=self.password_checkbox.isChecked(),
         )
         self.settings_message.setText(message)
-
-    def _assign_port(self, side: str) -> None:
-        combo = self.left_port_combo if side == "left" else self.right_port_combo
-        target = self.main_window._port_combo if side == "left" else self.main_window._right_port_combo
-        simulate = (
-            self.main_window._simulate_checkbox
-            if side == "left"
-            else self.main_window._simulate_right_checkbox
-        )
-        simulate.setChecked(False)
-        target.setCurrentText(combo.currentText())
-        if side == "left":
-            self.main_window._connect()
-        else:
-            self.main_window._connect_right()
 
     def _selected_path(self, table: QTableWidget) -> Path | None:
         row = table.currentRow()

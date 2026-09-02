@@ -323,55 +323,59 @@ def test_device_diagnostics_reads_existing_runtime_counters_directly(tmp_path) -
     }
 
 
-def test_existing_main_window_remains_teacher_window_with_reused_port_controls(app) -> None:
+def test_classroom_dock_is_read_only_mirror_of_mainwindow_device_controls(app) -> None:
     window = MainWindow(simulate=False, paths=resolve_project_paths())
     try:
         assert type(window) is MainWindow
-        assert isinstance(window._classroom_dock, QDockWidget)
-        assert window._classroom_dock.windowTitle() == "课堂管理"
-        called = []
-        window._connect = lambda: called.append(window._port_combo.currentText())
-        window._classroom_dock.left_port_combo.setCurrentText(
-            window._classroom_dock.left_port_combo.itemText(0)
-        )
-        window._classroom_dock._assign_port("left")
-        assert called == [window._port_combo.currentText()]
+        dock = window._classroom_dock
+        assert isinstance(dock, QDockWidget)
+        assert dock.windowTitle() == "课堂管理"
+        assert not hasattr(dock, "left_port_combo")
+        assert not hasattr(dock, "right_port_combo")
+        assert not hasattr(dock, "left_assign_button")
+        assert not hasattr(dock, "right_assign_button")
+        assert not hasattr(dock, "_assign_port")
         assert not hasattr(window._teacher_classroom_service, "serial_source")
+        assert "Left" in [label.text() for label in window.findChildren(type(dock.left_device_status_label))]
     finally:
         window.close()
 
 
-def test_classroom_port_candidates_follow_mainwindow_refresh(app, monkeypatch) -> None:
+def test_classroom_device_status_tracks_mainwindow_ports_connections_and_refresh(app, monkeypatch) -> None:
     ports = ["COM6", "COM12", "COM13"]
     monkeypatch.setattr(main_window_module, "list_serial_ports", lambda: list(ports))
     monkeypatch.setattr(MainWindow, "_load_game_model", lambda _self: None)
     window = MainWindow(simulate=False, paths=resolve_project_paths())
     try:
         dock = window._classroom_dock
-        assert [dock.left_port_combo.itemText(index) for index in range(dock.left_port_combo.count())] == ports
-        assert [dock.right_port_combo.itemText(index) for index in range(dock.right_port_combo.count())] == ports
-
         window._port_combo.setCurrentText("COM6")
         window._right_port_combo.setCurrentText("COM13")
-        dock.left_port_combo.setCurrentText("COM6")
-        dock.right_port_combo.setCurrentText("COM13")
+        assert dock.left_device_status_label.text() == "COM6 · 未连接"
+        assert dock.right_device_status_label.text() == "COM13 · 未连接"
+
+        window._set_connected_ui_for_side("left", True)
+        window._set_connected_ui_for_side("right", True)
+        assert dock.left_device_status_label.text() == "COM6 · 已连接"
+        assert dock.right_device_status_label.text() == "COM13 · 已连接"
+        window._set_connected_ui_for_side("right", False)
+        assert dock.right_device_status_label.text() == "COM13 · 未连接"
+
+        window._set_connected_ui_for_side("left", False)
         ports[:] = ["COM6", "COM7"]
         window._refresh_ports_button.click()
 
         assert [window._port_combo.itemText(index) for index in range(window._port_combo.count())] == ports
         assert [window._right_port_combo.itemText(index) for index in range(window._right_port_combo.count())] == ports
-        assert [dock.left_port_combo.itemText(index) for index in range(dock.left_port_combo.count())] == ports
-        assert [dock.right_port_combo.itemText(index) for index in range(dock.right_port_combo.count())] == ports
         assert window._port_combo.currentText() == "COM6"
-        assert dock.left_port_combo.currentText() == "COM6"
+        assert dock.left_device_status_label.text() == "COM6 · 未连接"
         assert window._right_port_combo.currentText() == ""
-        assert dock.right_port_combo.currentText() == ""
-        assert "右手" in dock.ports_message.text()
+        assert dock.right_device_status_label.text() == "未选择端口 · 未连接"
 
-        dock.left_port_combo.setCurrentText("COM6")
-        dock.right_port_combo.setCurrentText("COM7")
-        assert dock.left_port_combo.currentText() == "COM6"
-        assert dock.right_port_combo.currentText() == "COM7"
+        window._right_port_combo.setCurrentText("COM7")
+        assert dock.right_device_status_label.text() == "COM7 · 未连接"
+        dock.refresh_ports_button.click()
+        assert window._right_port_combo.currentText() == "COM7"
+        assert "主窗口 Left / Right" in dock.ports_message.text()
     finally:
         window.close()
 
