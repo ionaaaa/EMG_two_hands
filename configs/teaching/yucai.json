@@ -113,6 +113,7 @@
     }
   },
   "storage": {
+    "classroom_id": "yucai_2026",
     "dataset_path": "data/datasets/{student_id}/{session_id}",
     "recording_path": "data/recordings/{recording_id}",
     "personal_model_path": "apps/desktop/models/{run_id}/gesture_classifier.ts",

@@ -14,6 +14,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from emg_live_marker.device.protocol import EMG_FS
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage
 from emg_live_marker.realtime.recorder import SessionRecorder
 
 COLLECTION_GESTURES = ("fist", "finger_spread", "thumb_index_pinch")
@@ -97,12 +98,14 @@ class CollectionController(QObject):
         self,
         *,
         recorder: SessionRecorder | None = None,
+        classroom_storage: ClassroomStorage | None = None,
         device_ready: Callable[[], bool] | None = None,
         clock: Callable[[], float] = monotonic,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.recorder = recorder or SessionRecorder()
+        self.classroom_storage = classroom_storage
         self.device_ready = device_ready or (lambda: True)
         self.clock = clock
         self._timer = QTimer(self)
@@ -145,7 +148,20 @@ class CollectionController(QObject):
         self.current_index = -1
         self._invalid_count = 0
         self._repeated_count = 0
-        self.session_id, self.session_dir = self._new_session_target(dataset_root, plan.subject_id)
+        if self.classroom_storage is None:
+            self.session_id, self.session_dir = self._new_session_target(
+                dataset_root, plan.subject_id
+            )
+        else:
+            prefix = datetime.now(timezone.utc).strftime("student_%Y%m%d_%H%M%S")
+            try:
+                self.session_id, self.session_dir = self.classroom_storage.next_session_path(
+                    plan.subject_id, prefix
+                )
+                self.classroom_storage.set_active_group(plan.subject_id)
+            except (OSError, ValueError):
+                self.session_dir = None
+                return False
         metadata = {
             "anonymous_id": plan.subject_id,
             "subject_id": plan.subject_id,
@@ -361,7 +377,7 @@ class CollectionController(QObject):
                         "invalid_trial_count": self._invalid_count,
                     }
                 )
-                metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+                ClassroomStorage.atomic_write_json(metadata_path, metadata)
             finally:
                 self.recorder.stop()
         self._emit(message="采集完成并已保存" if status == "completed" else "部分完成，已安全保存")

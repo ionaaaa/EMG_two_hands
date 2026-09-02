@@ -18,6 +18,7 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 
 from emg_live_marker.ml.gesture_model import DemoGesturePredictor, load_model
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage, ClassroomStorageError
 from emg_live_marker.realtime.student_observation import StudentObservationService
 
 COLLECT_GESTURES = ("fist", "finger_spread", "thumb_index_pinch")
@@ -79,6 +80,7 @@ class StudentPersonalTrainingService(QObject):
         course_config: dict[str, Any],
         observation_service: StudentObservationService,
         *,
+        classroom_storage: ClassroomStorage | None = None,
         process_factory: Callable[[QObject], object] | None = None,
         model_loader: Callable[[str | Path], Any] | None = None,
         parent: QObject | None = None,
@@ -88,6 +90,7 @@ class StudentPersonalTrainingService(QObject):
         self.dataset_root = Path(dataset_root).resolve()
         self.course_config = course_config
         self.observation_service = observation_service
+        self.classroom_storage = classroom_storage
         self._process_factory = process_factory or (lambda parent: QProcess(parent))
         self._model_loader = model_loader or load_model
         training = course_config.get("personal_training", {})
@@ -119,6 +122,7 @@ class StudentPersonalTrainingService(QObject):
         self.last_valid_model_dir: Path | None = None
         self.last_arguments: list[str] = []
         self.report_summary: dict[str, Any] = {}
+        self.model_restore_message = ""
         self._stdout_buffer = ""
         self._last_output_line = ""
         self._selected_session: StudentTrainingSession | None = None
@@ -133,14 +137,15 @@ class StudentPersonalTrainingService(QObject):
 
     def discover_sessions(self) -> tuple[StudentTrainingSession, ...]:
         discovered: list[StudentTrainingSession] = []
-        if self.dataset_root.is_dir():
-            for metadata_path in sorted(self.dataset_root.rglob("metadata.json")):
-                session_dir = metadata_path.parent
-                try:
-                    relative = session_dir.relative_to(self.dataset_root)
-                except ValueError:
-                    continue
-                group_id = relative.parts[0] if len(relative.parts) > 1 else "未分组"
+        seen: set[Path] = set()
+        if self.classroom_storage is not None:
+            for group_id, session_dir in self.classroom_storage.iter_sessions():
+                discovered.append(self._inspect_session(group_id, session_dir))
+                seen.add(session_dir.resolve())
+        for group_id, session_dir in ClassroomStorage.discover_legacy_sessions(
+            self.dataset_root
+        ):
+            if session_dir.resolve() not in seen:
                 discovered.append(self._inspect_session(group_id, session_dir))
         self.sessions = tuple(discovered)
         self.sessions_changed.emit(self.sessions)
@@ -167,8 +172,17 @@ class StudentPersonalTrainingService(QObject):
             self._emit("error", "标准教学模型缺失，无法开始个人训练。", counts=inspected.counts)
             return False
 
-        self.output_root.mkdir(parents=True, exist_ok=True)
-        temp_path = Path(tempfile.mkdtemp(prefix=".training-", dir=self.output_root))
+        try:
+            output_root = (
+                self.classroom_storage.group_paths(inspected.group_id, create=True).models
+                if self.classroom_storage is not None
+                else self.output_root
+            )
+            output_root.mkdir(parents=True, exist_ok=True)
+            temp_path = Path(tempfile.mkdtemp(prefix=".training-", dir=output_root))
+        except (OSError, ClassroomStorageError):
+            self._emit("error", "个人模型输出目录创建失败。", counts=inspected.counts)
+            return False
         if temp_path == standard_path.parent or standard_path.is_relative_to(temp_path):
             self._cleanup_output(temp_path)
             self._emit("error", "训练输出位置无效，标准模型不会被覆盖。")
@@ -220,6 +234,8 @@ class StudentPersonalTrainingService(QObject):
 
     def use_standard_model(self) -> bool:
         switched = self.observation_service.use_standard_model()
+        if switched:
+            self._save_active_model("standard", None)
         self._emit(
             "model-selected" if switched else "error",
             "已切换到标准模型。" if switched else "标准模型切换失败。",
@@ -228,11 +244,60 @@ class StudentPersonalTrainingService(QObject):
 
     def use_personal_model(self) -> bool:
         switched = self.observation_service.use_personal_model()
+        if switched and self.last_valid_model_dir is not None:
+            self._save_active_model("personal", self.last_valid_model_dir.name)
         self._emit(
             "model-selected" if switched else "error",
             "已切换到我的模型。" if switched else "尚无有效的个人模型，请先完成训练。",
         )
         return switched
+
+    def restore_model_selection(self, group_id: str) -> tuple[bool, str]:
+        """Restore a semantic personal run selection, safely falling back to standard."""
+
+        if self.classroom_storage is None:
+            self.model_restore_message = "使用标准模型。"
+            return True, self.model_restore_message
+        try:
+            settings = self.classroom_storage.read_settings(group_id)
+        except (OSError, ClassroomStorageError):
+            self.observation_service.use_standard_model()
+            self.model_restore_message = "小组设置读取失败，已安全回退到标准模型。"
+            return False, self.model_restore_message
+        active = settings.get("active_model", {})
+        if not isinstance(active, dict) or active.get("type") != "personal":
+            self.observation_service.use_standard_model()
+            self.model_restore_message = "已恢复标准模型。"
+            return True, self.model_restore_message
+        run_id = active.get("run_id")
+        try:
+            model_dir = self.classroom_storage.model_path(group_id, run_id)
+            model_path = model_dir / "gesture_classifier.pt"
+            if not all((model_dir / name).is_file() for name in REQUIRED_ARTIFACTS) or not (
+                model_dir / "personal_model.valid.json"
+            ).is_file():
+                raise FileNotFoundError(model_path)
+            predictor = self._model_loader(model_path)
+            if isinstance(predictor, DemoGesturePredictor):
+                raise ValueError("demo predictor")
+            if not self.observation_service.activate_personal_model(model_path, predictor):
+                raise ValueError("activation failed")
+        except (OSError, ValueError, ClassroomStorageError):
+            self.observation_service.use_standard_model()
+            try:
+                self.classroom_storage.write_settings(
+                    group_id,
+                    {"active_model": {"type": "standard", "run_id": None}},
+                )
+            except (OSError, ClassroomStorageError):
+                pass
+            self.model_restore_message = (
+                "已保存的个人模型不存在或无效，已安全回退到标准模型。"
+            )
+            return False, self.model_restore_message
+        self.last_valid_model_dir = model_dir
+        self.model_restore_message = "已恢复我的模型。"
+        return True, self.model_restore_message
 
     def close(self) -> None:
         if not self.running or self.process is None:
@@ -459,20 +524,22 @@ class StudentPersonalTrainingService(QObject):
             return
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         safe_group = re.sub(r"[^A-Za-z0-9_-]", "_", session.group_id)
-        final_dir = self.output_root / f"{safe_group}_{stamp}_{uuid4().hex[:8]}"
+        run_id = f"run_{stamp}_{uuid4().hex[:8]}"
+        final_dir = (
+            self.classroom_storage.model_path(session.group_id, run_id)
+            if self.classroom_storage is not None
+            else self.output_root / f"{safe_group}_{stamp}_{uuid4().hex[:8]}"
+        )
         try:
             temp_dir.replace(final_dir)
-            (final_dir / "personal_model.valid.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "anonymous_group_id": session.group_id,
-                        "validated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            ClassroomStorage.atomic_write_json(
+                final_dir / "personal_model.valid.json",
+                {
+                    "schema_version": 1,
+                    "anonymous_group_id": session.group_id,
+                    "run_id": final_dir.name,
+                    "validated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                },
             )
         except OSError:
             self._cleanup_output(temp_dir)
@@ -487,6 +554,7 @@ class StudentPersonalTrainingService(QObject):
             self._emit("failed", "个人模型激活失败，继续使用训练前模型。")
             return
         self.last_valid_model_dir = final_dir
+        self._save_active_model("personal", final_dir.name, group_id=session.group_id)
         self.temporary_output_dir = None
         self.report_summary = summary
         self._emit(
@@ -496,6 +564,22 @@ class StudentPersonalTrainingService(QObject):
             validation_accuracy=summary["validation_accuracy"],
             per_class=summary["per_class_performance"],
         )
+
+    def _save_active_model(
+        self, model_type: str, run_id: str | None, *, group_id: str = ""
+    ) -> None:
+        if self.classroom_storage is None:
+            return
+        group = group_id or self.classroom_storage.active_group()
+        if not group:
+            return
+        try:
+            self.classroom_storage.write_settings(
+                group,
+                {"active_model": {"type": model_type, "run_id": run_id}},
+            )
+        except (OSError, ClassroomStorageError):
+            return
 
     @staticmethod
     def _report_summary(report: object) -> dict[str, Any]:

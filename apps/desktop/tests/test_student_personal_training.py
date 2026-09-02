@@ -16,6 +16,7 @@ from emg_live_marker.realtime.student_personal_training import (
     REQUIRED_ARTIFACTS,
     StudentPersonalTrainingService,
 )
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage
 from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.student_control_optimization import StudentControlEffectTestService
 from emg_live_marker.ui.student_pages import COURSE_ENTRIES, StudentPersonalTrainingPage
@@ -205,6 +206,29 @@ def test_discovers_anonymous_sessions_and_counts_only_completed(tmp_path) -> Non
     assert inspected.ready is True
     assert inspected.counts == {"fist": 5, "finger_spread": 5, "thumb_index_pinch": 5}
     assert "握拳 5 次" in inspected.message
+
+
+def test_training_temp_directory_is_inside_group_models(tmp_path) -> None:
+    service, _observation, _processes, _session, _standard = make_service(tmp_path)
+    classroom = ClassroomStorage(
+        tmp_path / "data" / "classroom",
+        "yucai_2026",
+        "yucai",
+        app_data_root=tmp_path / "app-data" / "EMGTwoHands",
+    )
+    service.classroom_storage = classroom
+    inspected = service.discover_sessions()[0]
+    assert service.start_training(inspected)
+    assert service.temporary_output_dir.parent == classroom.group_paths("group_01").models
+    assert service.temporary_output_dir.name.startswith(".training-")
+    write_artifacts(service.temporary_output_dir)
+    _processes[0].finished.emit(0, None)
+    assert service.last_valid_model_dir.parent == classroom.group_paths("group_01").models
+    assert service.last_valid_model_dir.name.startswith("run_")
+    assert classroom.read_settings("group_01")["active_model"] == {
+        "type": "personal",
+        "run_id": service.last_valid_model_dir.name,
+    }
 
 
 def test_incomplete_metadata_blocks_training_with_chinese_counts(tmp_path) -> None:

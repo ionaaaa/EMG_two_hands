@@ -13,6 +13,7 @@ from emg_live_marker.device.check_service import (
 )
 from emg_live_marker.paths import resolve_project_paths
 from emg_live_marker.realtime.collection import CollectionController, CollectionPlan
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage
 from emg_live_marker.ui.student_window import StudentMainWindow
 
 
@@ -126,6 +127,23 @@ def test_completed_metadata_and_unique_session_id_are_saved(tmp_path) -> None:
     assert metadata["collection_status"] == "partial"
     _, next_dir = CollectionController._new_session_target(tmp_path, "group_01")
     assert next_dir != session_dir
+
+
+def test_new_collection_writes_to_classroom_group_sessions(tmp_path) -> None:
+    classroom = ClassroomStorage(
+        tmp_path / "data" / "classroom",
+        "yucai_2026",
+        "yucai",
+        app_data_root=tmp_path / "app-data" / "EMGTwoHands",
+    )
+    controller = CollectionController(
+        recorder=FakeRecorder(),
+        classroom_storage=classroom,
+    )
+    assert controller.start(plan(), tmp_path / "legacy-datasets", {})
+    assert controller.session_dir.parent == classroom.group_paths("group_01").sessions
+    assert not (tmp_path / "legacy-datasets").exists()
+    controller.end()
 
 
 def test_student_page_rejects_bad_anonymous_id_and_locks_single_healthy_side() -> None:

@@ -15,6 +15,7 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, Signal
 
 from emg_live_marker.realtime.game_mapping import GameMappingService
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage, ClassroomStorageError
 from emg_live_marker.realtime.student_observation import StudentObservationService
 
 VALID_MODES = ("left", "right", "both")
@@ -37,12 +38,14 @@ class StudentCompetitionService(QObject):
         observation_service: StudentObservationService,
         mapping_service: GameMappingService,
         *,
+        classroom_storage: ClassroomStorage | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.project_root = Path(project_root).resolve()
         self.observation_service = observation_service
         self.mapping_service = mapping_service
+        self.classroom_storage = classroom_storage
         storage = course_config.get("storage", {})
         template = storage.get("competition_results_path", "") if isinstance(storage, dict) else ""
         self.results_path_template = str(template).strip()
@@ -56,8 +59,18 @@ class StudentCompetitionService(QObject):
         normalized = self._valid_student_id(student_id)
         if normalized is None:
             return False, "请先填写匿名小组编号，才能开始挑战赛。"
-        if not self.results_path_template:
+        if self.classroom_storage is None and not self.results_path_template:
             return False, "比赛结果保存位置未配置，请联系老师。"
+        try:
+            if self.classroom_storage is not None:
+                self.classroom_storage.group_paths(normalized, create=True)
+                self.classroom_storage.set_active_group(normalized)
+                if self.mapping_service.current_group_id != normalized:
+                    loaded, _message = self.mapping_service.load_group(normalized)
+                    if not loaded:
+                        self.mapping_service.save_current_group(normalized)
+        except (OSError, ClassroomStorageError):
+            return False, "匿名小组课堂目录创建失败，请联系老师。"
         with self._lock:
             if normalized != self.student_id:
                 self._seen_result_ids.clear()
@@ -107,11 +120,7 @@ class StudentCompetitionService(QObject):
         try:
             result_path = self._result_path(competition_id, student_id)
             result_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = result_path.with_suffix(result_path.suffix + ".tmp")
-            temporary.write_text(
-                json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
-            temporary.replace(result_path)
+            ClassroomStorage.atomic_write_json(result_path, result)
         except (OSError, KeyError, ValueError) as exc:
             with self._lock:
                 self._seen_result_ids.discard(dedupe_id)
@@ -125,6 +134,8 @@ class StudentCompetitionService(QObject):
         return 201, {"ok": True, "duplicate": False, "message": "成绩已保存。"}
 
     def _result_path(self, competition_id: str, student_id: str) -> Path:
+        if self.classroom_storage is not None:
+            return self.classroom_storage.result_path(student_id, competition_id)
         configured = Path(
             self.results_path_template.format(
                 competition_id=competition_id,

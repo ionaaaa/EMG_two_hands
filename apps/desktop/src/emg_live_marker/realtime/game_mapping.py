@@ -7,7 +7,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QStandardPaths, Signal
+from PySide6.QtCore import QObject, Signal
+
+from emg_live_marker.realtime.classroom_storage import (
+    ClassroomStorage,
+    ClassroomStorageError,
+    default_app_data_root,
+)
 
 GESTURES = ("rest", "fist", "open-palm", "pinch")
 EDITABLE_GESTURES = ("fist", "open-palm")
@@ -32,6 +38,7 @@ class GameMappingService(QObject):
         course_config: dict[str, Any],
         *,
         storage_root: Path | None = None,
+        classroom_storage: ClassroomStorage | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -48,9 +55,8 @@ class GameMappingService(QObject):
         )
         self._control_preferences = dict(self._default_control_preferences)
         self.current_group_id = ""
-        default_root = Path(
-            QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
-        ) / "student-game-mappings"
+        self.classroom_storage = classroom_storage
+        default_root = default_app_data_root() / "legacy-student-game-mappings"
         self.storage_root = Path(storage_root or default_root).resolve()
         self._restore_last_group()
 
@@ -83,6 +89,7 @@ class GameMappingService(QObject):
         self.control_preferences_changed.emit(
             validated["sensitivity"], validated["control_style"]
         )
+        self._persist_current_settings()
         return True
 
     def set_editable_mapping(self, fist_command: str, open_palm_command: str) -> None:
@@ -103,24 +110,41 @@ class GameMappingService(QObject):
         self.current_group_id = ""
         self._apply_mapping(self._default_mapping)
         self._apply_control_preferences(self._default_control_preferences)
+        if self.classroom_storage is not None:
+            try:
+                self.classroom_storage.clear_active_group()
+            except OSError:
+                pass
 
     def save_current_group(self, group_id: str) -> tuple[bool, str]:
         normalized = self._valid_group_id(group_id)
         if normalized is None:
             return False, "请先填写匿名小组编号，只能使用字母、数字、下划线和短横线。"
-        payload = {
-            "schema_version": 1,
-            "anonymous_group_id": normalized,
-            "mapping": self.resolved_mapping,
-            "control_profile": self.control_preferences,
-        }
         try:
-            self.storage_root.mkdir(parents=True, exist_ok=True)
-            self._write_json(self._group_path(normalized), payload)
-            self._write_json(
-                self.storage_root / "current-group.json",
-                {"schema_version": 1, "anonymous_group_id": normalized},
-            )
+            if self.classroom_storage is not None:
+                self.classroom_storage.group_paths(normalized, create=True)
+                self.classroom_storage.write_settings(
+                    normalized,
+                    {
+                        "mapping": self.resolved_mapping,
+                        "sensitivity": self._control_preferences["sensitivity"],
+                        "control_style": self._control_preferences["control_style"],
+                    },
+                )
+                self.classroom_storage.set_active_group(normalized)
+            else:
+                payload = {
+                    "schema_version": 1,
+                    "anonymous_group_id": normalized,
+                    "mapping": self.resolved_mapping,
+                    "control_profile": self.control_preferences,
+                }
+                self.storage_root.mkdir(parents=True, exist_ok=True)
+                self._write_json(self._group_path(normalized), payload)
+                self._write_json(
+                    self.storage_root / "current-group.json",
+                    {"schema_version": 1, "anonymous_group_id": normalized},
+                )
         except OSError:
             return False, "本组设置保存失败，请稍后重试。"
         self.current_group_id = normalized
@@ -130,12 +154,24 @@ class GameMappingService(QObject):
         normalized = self._valid_group_id(group_id)
         if normalized is None:
             return False, "请先填写有效的匿名小组编号。"
-        path = self._group_path(normalized)
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            if self.classroom_storage is not None:
+                path = self.classroom_storage.group_paths(normalized).settings
+                if not path.is_file():
+                    return False, "未找到该匿名小组已保存的设置，将使用当前设置。"
+                payload = self.classroom_storage.read_settings(normalized)
+                preferences_value = {
+                    "sensitivity": payload.get("sensitivity"),
+                    "control_style": payload.get("control_style"),
+                }
+                self.classroom_storage.set_active_group(normalized)
+            else:
+                path = self._group_path(normalized)
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                preferences_value = payload.get("control_profile")
             mapping = self._validate_mapping(payload.get("mapping"))
             preferences = self._validate_control_preferences(
-                payload.get("control_profile"), fallback=self._default_control_preferences
+                preferences_value, fallback=self._default_control_preferences
             )
         except FileNotFoundError:
             return False, "未找到该匿名小组已保存的设置，将使用当前设置。"
@@ -176,8 +212,27 @@ class GameMappingService(QObject):
             return
         self._mapping = validated
         self.mapping_changed.emit(self.runtime_config())
+        self._persist_current_settings()
 
     def _restore_last_group(self) -> None:
+        if self.classroom_storage is not None:
+            group_id = self.classroom_storage.active_group()
+            if not group_id:
+                return
+            payload = self.classroom_storage.read_settings(group_id)
+            try:
+                self._mapping = self._validate_mapping(payload.get("mapping"))
+                self._control_preferences = self._validate_control_preferences(
+                    {
+                        "sensitivity": payload.get("sensitivity"),
+                        "control_style": payload.get("control_style"),
+                    },
+                    fallback=self._default_control_preferences,
+                )
+            except GameMappingConfigError:
+                return
+            self.current_group_id = group_id
+            return
         path = self.storage_root / "current-group.json"
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -205,6 +260,22 @@ class GameMappingService(QObject):
         self.control_preferences_changed.emit(
             preferences["sensitivity"], preferences["control_style"]
         )
+        self._persist_current_settings()
+
+    def _persist_current_settings(self) -> None:
+        if self.classroom_storage is None or not self.current_group_id:
+            return
+        try:
+            self.classroom_storage.write_settings(
+                self.current_group_id,
+                {
+                    "mapping": self.resolved_mapping,
+                    "sensitivity": self._control_preferences["sensitivity"],
+                    "control_style": self._control_preferences["control_style"],
+                },
+            )
+        except (OSError, ClassroomStorageError):
+            return
 
     def _group_path(self, group_id: str) -> Path:
         return self.storage_root / f"{group_id}.json"
@@ -218,12 +289,7 @@ class GameMappingService(QObject):
 
     @staticmethod
     def _write_json(path: Path, payload: dict[str, Any]) -> None:
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(path)
+        ClassroomStorage.atomic_write_json(path, payload)
 
     @staticmethod
     def _validate_commands(value: object) -> dict[str, dict[str, str]]:

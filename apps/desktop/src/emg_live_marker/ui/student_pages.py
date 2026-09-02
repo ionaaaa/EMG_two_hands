@@ -800,8 +800,10 @@ class StudentPersonalTrainingPage(QWidget):
             self.status_label.setText("未找到采集数据，请先完成手势采集。")
 
     def _populate_sessions(self, group_id: str) -> None:
+        restore_message = ""
         if group_id:
             self.mapping_service.load_group(group_id)
+            _restored, restore_message = self.service.restore_model_selection(group_id)
             self._sync_control_combos()
             preferences = self.mapping_service.control_preferences
             self.service.observation_service.apply_control_profile(
@@ -814,6 +816,8 @@ class StudentPersonalTrainingPage(QWidget):
             self.session_combo.addItem(session.session_id, session)
         self.session_combo.blockSignals(False)
         self._show_selected_session()
+        if "回退" in restore_message:
+            self.status_label.setText(restore_message)
 
     def _selected_session(self) -> StudentTrainingSession | None:
         value = self.session_combo.currentData()

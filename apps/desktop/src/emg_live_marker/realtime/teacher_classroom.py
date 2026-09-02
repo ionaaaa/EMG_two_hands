@@ -10,10 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from PySide6.QtCore import QObject, QStandardPaths, Signal
+from PySide6.QtCore import QObject, Signal
 
 from emg_live_marker.ml.gesture_model import DemoGesturePredictor, load_model
 from emg_live_marker.paths import ProjectPaths
+from emg_live_marker.realtime.classroom_storage import (
+    ClassroomStorage,
+    ClassroomStorageError,
+    default_app_data_root,
+)
 
 
 def load_teaching_course_config(project_root: Path) -> dict[str, Any]:
@@ -26,10 +31,7 @@ def load_teaching_course_config(project_root: Path) -> dict[str, Any]:
 
 
 def default_classroom_settings_path() -> Path:
-    root = Path(
-        QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
-    )
-    return root / "classroom_settings.json"
+    return default_app_data_root() / "classroom_settings.json"
 
 
 def merge_classroom_overrides(
@@ -84,6 +86,7 @@ class ClassroomSession:
     repeated_count: int
     recollect_requested: bool
     path: Path
+    legacy: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,6 +102,7 @@ class PersonalModelRecord:
     path: Path
     validation_accuracy: float | None
     trained_at: str
+    legacy: bool = False
 
 
 class TeacherClassroomService(QObject):
@@ -113,6 +117,7 @@ class TeacherClassroomService(QObject):
         *,
         settings_path: Path | None = None,
         mapping_storage_root: Path | None = None,
+        classroom_storage: ClassroomStorage | None = None,
         model_loader: Callable[[str | Path], Any] | None = None,
         parent: QObject | None = None,
     ) -> None:
@@ -120,10 +125,12 @@ class TeacherClassroomService(QObject):
         self.paths = paths
         self.course_config = course_config
         self.settings_path = Path(settings_path or default_classroom_settings_path()).resolve()
-        default_mapping_root = Path(
-            QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
-        ) / "student-game-mappings"
+        default_mapping_root = default_app_data_root() / "legacy-student-game-mappings"
         self.mapping_storage_root = Path(mapping_storage_root or default_mapping_root).resolve()
+        self.classroom_storage = classroom_storage or ClassroomStorage.from_config(
+            self.paths.classroom_root,
+            course_config,
+        )
         self._model_loader = model_loader or load_model
         self._base_settings = self._settings_from_course(course_config)
         self.settings = self.load_settings()
@@ -222,12 +229,18 @@ class TeacherClassroomService(QObject):
 
     def scan_sessions(self) -> tuple[ClassroomSession, ...]:
         sessions: list[ClassroomSession] = []
-        if not self.paths.dataset_root.is_dir():
-            return ()
-        for metadata_path in sorted(self.paths.dataset_root.rglob("metadata.json")):
-            session_dir = metadata_path.parent.resolve()
-            if not self._inside(session_dir, self.paths.dataset_root):
-                continue
+        discovered = [
+            (group, session, False)
+            for group, session in self.classroom_storage.iter_sessions()
+        ]
+        discovered.extend(
+            (group, session, True)
+            for group, session in ClassroomStorage.discover_legacy_sessions(
+                self.paths.dataset_root
+            )
+        )
+        for discovered_group, session_dir, legacy in discovered:
+            metadata_path = session_dir / "metadata.json"
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -240,17 +253,20 @@ class TeacherClassroomService(QObject):
                 statuses = {}
             if not isinstance(valid_counts, dict):
                 valid_counts = {}
-            try:
-                relative = session_dir.relative_to(self.paths.dataset_root.resolve())
-            except ValueError:
-                continue
             student_id = str(
-                metadata.get("anonymous_id") or metadata.get("subject_id") or relative.parts[0]
+                metadata.get("anonymous_id") or metadata.get("subject_id") or discovered_group
             )
+            session_id = str(metadata.get("session_id") or session_dir.name)
+            recollect = False
+            try:
+                group_settings = self.classroom_storage.read_settings(student_id)
+                recollect = session_id in group_settings.get("recollect_requested", [])
+            except (OSError, ClassroomStorageError):
+                pass
             sessions.append(
                 ClassroomSession(
                     student_id=student_id,
-                    session_id=str(metadata.get("session_id") or session_dir.name),
+                    session_id=session_id,
                     hand=str(metadata.get("selected_hand") or metadata.get("side") or "未知"),
                     status=str(metadata.get("collection_status") or "未知"),
                     valid_counts={
@@ -263,22 +279,27 @@ class TeacherClassroomService(QObject):
                     repeated_count=self._safe_int(
                         metadata.get("repeated_trial_count", sum(v == "repeated" for v in statuses.values()))
                     ),
-                    recollect_requested=(session_dir / "recollect_requested.json").is_file(),
+                    recollect_requested=recollect,
                     path=session_dir,
+                    legacy=legacy,
                 )
             )
         return tuple(sessions)
 
     def mark_recollect(self, session_path: str | Path, reason: str = "教师标记重新采集") -> tuple[bool, str]:
-        session = self._valid_session_path(session_path)
-        if session is None:
+        record = self._session_by_path(session_path)
+        if record is None:
             return False, "采集会话路径无效，不能标记。"
         try:
-            self._write_json(
-                session / "recollect_requested.json",
-                {"schema_version": 1, "requested": True, "reason": str(reason)},
+            settings = self.classroom_storage.read_settings(record.student_id)
+            requested = list(settings.get("recollect_requested", []))
+            if record.session_id not in requested:
+                requested.append(record.session_id)
+            self.classroom_storage.write_settings(
+                record.student_id,
+                {"recollect_requested": requested},
             )
-        except OSError:
+        except (OSError, ClassroomStorageError):
             return False, "重新采集标记保存失败。"
         self.sessions_changed.emit(self.scan_sessions())
         return True, "已标记重新采集，旧数据仍然保留。"
@@ -286,22 +307,47 @@ class TeacherClassroomService(QObject):
     def delete_session(self, session_path: str | Path, *, confirmed: bool) -> tuple[bool, str]:
         if not confirmed:
             return False, "删除已取消。"
-        session = self._valid_session_path(session_path)
-        if session is None:
+        record = self._session_by_path(session_path)
+        if record is None:
             return False, "采集会话路径无效，禁止删除。"
+        if record.legacy:
+            return False, "旧版采集数据保持只读，不能在课堂管理中删除。"
+        session = record.path
         try:
             shutil.rmtree(session)
         except OSError:
             return False, "本次采集删除失败。"
+        try:
+            settings = self.classroom_storage.read_settings(record.student_id)
+            requested = [
+                item
+                for item in settings.get("recollect_requested", [])
+                if item != record.session_id
+            ]
+            self.classroom_storage.write_settings(
+                record.student_id,
+                {"recollect_requested": requested},
+            )
+        except (OSError, ClassroomStorageError):
+            pass
         self.sessions_changed.emit(self.scan_sessions())
         return True, "本次采集已删除，无法从程序内恢复。"
 
     def scan_personal_models(self) -> tuple[PersonalModelRecord, ...]:
         records: list[PersonalModelRecord] = []
-        if not self.paths.models_root.is_dir():
-            return ()
-        for marker_path in sorted(self.paths.models_root.rglob("personal_model.valid.json")):
-            model_dir = marker_path.parent.resolve()
+        discovered = [
+            (group, model_dir, False)
+            for group, _run_id, model_dir in self.classroom_storage.iter_models()
+        ]
+        if self.paths.models_root.is_dir():
+            discovered.extend(
+                ("", marker.parent.resolve(), True)
+                for marker in sorted(
+                    self.paths.models_root.rglob("personal_model.valid.json")
+                )
+            )
+        for discovered_group, model_dir, legacy in discovered:
+            marker_path = model_dir / "personal_model.valid.json"
             report_path = model_dir / "train_report.json"
             model_path = model_dir / "gesture_classifier.pt"
             if not report_path.is_file() or not model_path.is_file():
@@ -318,7 +364,9 @@ class TeacherClassroomService(QObject):
                 validation_value = None
             records.append(
                 PersonalModelRecord(
-                    student_id=str(marker.get("anonymous_group_id", "未知")),
+                    student_id=str(
+                        marker.get("anonymous_group_id") or discovered_group or "未知"
+                    ),
                     path=model_dir,
                     validation_accuracy=validation_value,
                     trained_at=str(
@@ -327,6 +375,7 @@ class TeacherClassroomService(QObject):
                         or report.get("trained_at")
                         or "未知"
                     ),
+                    legacy=legacy,
                 )
             )
         return tuple(records)
@@ -337,8 +386,14 @@ class TeacherClassroomService(QObject):
         if not confirmed:
             return False, "删除已取消。"
         target = Path(model_dir).resolve()
-        if not self._inside(target, self.paths.models_root):
+        record = next(
+            (item for item in self.scan_personal_models() if item.path == target),
+            None,
+        )
+        if record is None:
             return False, "个人模型路径无效，禁止删除。"
+        if record.legacy:
+            return False, "旧版个人模型保持只读，不能在课堂管理中删除。"
         if not (target / "personal_model.valid.json").is_file():
             return False, "标准模型或未验证模型禁止删除。"
         standard = self.configured_standard_model_path
@@ -348,6 +403,16 @@ class TeacherClassroomService(QObject):
             shutil.rmtree(target)
         except OSError:
             return False, "个人模型删除失败。"
+        try:
+            settings = self.classroom_storage.read_settings(record.student_id)
+            active = settings.get("active_model", {})
+            if isinstance(active, dict) and active.get("run_id") == target.name:
+                self.classroom_storage.write_settings(
+                    record.student_id,
+                    {"active_model": {"type": "standard", "run_id": None}},
+                )
+        except (OSError, ClassroomStorageError):
+            pass
         return True, "个人模型已删除，无法从程序内恢复。"
 
     def scan_competition_results(self) -> tuple[dict[str, Any], ...]:
@@ -356,9 +421,10 @@ class TeacherClassroomService(QObject):
             "mode", "score", "accuracy", "max_combo", "outcome", "timestamp",
         }
         records: list[dict[str, Any]] = []
-        if not self.paths.reports_root.is_dir():
-            return ()
-        for path in sorted(self.paths.reports_root.rglob("*.json")):
+        paths = [path for _group, path in self.classroom_storage.iter_results()]
+        if self.paths.reports_root.is_dir():
+            paths.extend(sorted(self.paths.reports_root.rglob("*.json")))
+        for path in paths:
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -395,9 +461,9 @@ class TeacherClassroomService(QObject):
         return True, f"已导出 {len(records)} 条比赛记录。"
 
     def prepare_next_group(self) -> tuple[bool, str]:
-        current_group_path = self.mapping_storage_root / "current-group.json"
         try:
-            current_group_path.unlink(missing_ok=True)
+            self.classroom_storage.clear_active_group()
+            (self.mapping_storage_root / "current-group.json").unlink(missing_ok=True)
         except OSError:
             return False, "当前小组状态清理失败。"
         self.runtime_reset_requested.emit()
@@ -414,21 +480,12 @@ class TeacherClassroomService(QObject):
             for side, runtime in runtimes.items()
         }
 
-    def _valid_session_path(self, value: str | Path) -> Path | None:
+    def _session_by_path(self, value: str | Path) -> ClassroomSession | None:
         target = Path(value).resolve()
-        if not self._inside(target, self.paths.dataset_root):
-            return None
-        if target == self.paths.dataset_root.resolve() or not (target / "metadata.json").is_file():
-            return None
-        return target
-
-    @staticmethod
-    def _inside(target: Path, root: Path) -> bool:
-        try:
-            target.resolve().relative_to(Path(root).resolve())
-            return True
-        except ValueError:
-            return False
+        return next(
+            (session for session in self.scan_sessions() if session.path == target),
+            None,
+        )
 
     def _settings_from_course(self, config: dict[str, Any]) -> ClassroomSettings:
         realtime = config.get("realtime_decoding", {})
@@ -455,8 +512,4 @@ class TeacherClassroomService(QObject):
 
     @staticmethod
     def _write_json(path: Path, payload: dict[str, Any]) -> None:
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-        temporary.replace(path)
+        ClassroomStorage.atomic_write_json(path, payload)

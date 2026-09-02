@@ -26,7 +26,16 @@ class ProjectPaths:
     dataset_root: Path
     recordings_root: Path
     artifacts_root: Path
+    classroom_root: Path | None = None
     config_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.classroom_root is None:
+            object.__setattr__(
+                self,
+                "classroom_root",
+                (self.project_root / "data" / "classroom").resolve(),
+            )
 
     @property
     def models_root(self) -> Path:
@@ -43,6 +52,7 @@ def add_path_arguments(parser: ArgumentParser) -> None:
     parser.add_argument("--dataset-root", type=Path, default=None)
     parser.add_argument("--recordings-root", type=Path, default=None)
     parser.add_argument("--artifacts-root", type=Path, default=None)
+    parser.add_argument("--classroom-root", type=Path, default=None)
     parser.add_argument(
         "--paths-config",
         type=Path,
@@ -56,6 +66,7 @@ def resolve_project_paths(
     dataset_root: Path | str | None = None,
     recordings_root: Path | str | None = None,
     artifacts_root: Path | str | None = None,
+    classroom_root: Path | str | None = None,
     paths_config: Path | str | None = None,
     project_root: Path | None = None,
     environ: Mapping[str, str] | None = None,
@@ -71,16 +82,19 @@ def resolve_project_paths(
         "dataset_root": root / "data" / "datasets",
         "recordings_root": root / "data" / "recordings",
         "artifacts_root": root / "apps" / "desktop",
+        "classroom_root": root / "data" / "classroom",
     }
     values = {
         "dataset_root": dataset_root,
         "recordings_root": recordings_root,
         "artifacts_root": artifacts_root,
+        "classroom_root": classroom_root,
     }
     environment_names = {
         "dataset_root": "EMG_DATASET_ROOT",
         "recordings_root": "EMG_RECORDINGS_ROOT",
         "artifacts_root": "EMG_ARTIFACTS_ROOT",
+        "classroom_root": "EMG_CLASSROOM_ROOT",
     }
 
     resolved = {
@@ -102,6 +116,7 @@ def resolve_paths_from_args(args: Namespace) -> ProjectPaths:
         dataset_root=getattr(args, "dataset_root", None),
         recordings_root=getattr(args, "recordings_root", None),
         artifacts_root=getattr(args, "artifacts_root", None),
+        classroom_root=getattr(args, "classroom_root", None),
         paths_config=getattr(args, "paths_config", None),
     )
 
@@ -131,7 +146,12 @@ def _load_config(path: Path) -> dict[str, str]:
         raise ValueError(f"Invalid JSON path configuration: {path}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"Path configuration must be a JSON object: {path}")
-    unsupported = set(data) - {"dataset_root", "recordings_root", "artifacts_root"}
+    unsupported = set(data) - {
+        "dataset_root",
+        "recordings_root",
+        "artifacts_root",
+        "classroom_root",
+    }
     if unsupported:
         raise ValueError(f"Unsupported path configuration keys in {path}: {sorted(unsupported)}")
     return {name: str(value) for name, value in data.items() if value is not None}

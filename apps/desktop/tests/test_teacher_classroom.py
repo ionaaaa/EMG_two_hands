@@ -13,9 +13,11 @@ from PySide6.QtWidgets import QApplication, QDockWidget
 
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 from emg_live_marker.realtime.game_mapping import GameMappingService
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage
 from emg_live_marker.realtime.student_personal_training import StudentPersonalTrainingService
 from emg_live_marker.realtime.teacher_classroom import (
     TeacherClassroomService,
+    default_classroom_settings_path,
     merge_classroom_overrides,
 )
 from emg_live_marker.ui.main_window import MainWindow
@@ -62,6 +64,11 @@ def make_service(tmp_path, *, settings_path=None):
         config,
         settings_path=settings_path or tmp_path / "app-data" / "classroom_settings.json",
         mapping_storage_root=tmp_path / "app-data" / "student-game-mappings",
+        classroom_storage=ClassroomStorage.from_config(
+            paths.classroom_root,
+            config,
+            app_data_root=tmp_path / "app-data" / "EMGTwoHands",
+        ),
         model_loader=loader,
     )
     return service, paths, config, model
@@ -86,6 +93,12 @@ def test_classroom_settings_persist_outside_yucai_and_merge_into_student_config(
     assert Path(merged["realtime_decoding"]["standard_teaching_model_path"]) == model.resolve()
     assert merged["collection"]["trials_per_action"] == 12
     assert merged["personal_training"]["enabled"] is False
+
+
+def test_default_teacher_settings_use_application_specific_directory() -> None:
+    path = default_classroom_settings_path()
+    assert path.name == "classroom_settings.json"
+    assert path.parent.name == "EMGTwoHands"
 
 
 def test_student_config_loader_applies_classroom_override(tmp_path) -> None:
@@ -136,8 +149,12 @@ def test_personal_training_service_rejects_disabled_course(tmp_path) -> None:
     assert "老师已关闭" in service.snapshot.message
 
 
-def make_session(dataset_root: Path) -> Path:
-    session = dataset_root / "group_01" / "session_01"
+def make_session(dataset_root: Path, *, classroom: bool = False) -> Path:
+    session = (
+        dataset_root / "session_01"
+        if classroom
+        else dataset_root / "group_01" / "session_01"
+    )
     session.mkdir(parents=True)
     metadata = {
         "anonymous_id": "group_01",
@@ -154,7 +171,10 @@ def make_session(dataset_root: Path) -> Path:
 
 def test_session_scan_recollect_marker_and_safe_deletion(tmp_path) -> None:
     service, paths, _config, _model = make_service(tmp_path)
-    session = make_session(paths.dataset_root)
+    session = make_session(
+        service.classroom_storage.group_paths("group_01", create=True).sessions,
+        classroom=True,
+    )
     scanned = service.scan_sessions()
     assert len(scanned) == 1
     assert scanned[0].student_id == "group_01"
@@ -200,8 +220,7 @@ def test_standard_scan_requires_complete_loadable_model(tmp_path) -> None:
 
 def test_personal_model_report_and_confirmed_delete_never_delete_standard(tmp_path) -> None:
     service, paths, _config, standard = make_service(tmp_path)
-    personal = paths.models_root / "student_personal" / "group_01_run"
-    personal.mkdir(parents=True)
+    personal = service.classroom_storage.model_path("group_01", "run_01", create=True)
     (personal / "gesture_classifier.pt").write_bytes(b"personal")
     (personal / "personal_model.valid.json").write_text(
         json.dumps({"anonymous_group_id": "group_01", "validated_at": "2026-09-01T10:00:00Z"}),
@@ -261,7 +280,8 @@ def test_competition_summary_and_csv_preserve_json(tmp_path) -> None:
 def test_prepare_next_group_only_clears_current_pointer_and_emits_reset(tmp_path) -> None:
     service, paths, _config, _model = make_service(tmp_path)
     service.mapping_storage_root.mkdir(parents=True)
-    current = service.mapping_storage_root / "current-group.json"
+    service.classroom_storage.set_active_group("group_01")
+    current = service.classroom_storage.active_group_path
     saved_group = service.mapping_storage_root / "group_01.json"
     current.write_text("{}", encoding="utf-8")
     saved_group.write_text("{}", encoding="utf-8")
@@ -325,6 +345,10 @@ def test_student_next_group_reset_restores_defaults_without_deleting_artifacts(a
     artifact.write_text("{}", encoding="utf-8")
     window = StudentMainWindow(paths=resolve_project_paths())
     try:
+        assert window.collection_controller.classroom_storage is window.classroom_storage
+        assert window.game_mapping_service.classroom_storage is window.classroom_storage
+        assert window.personal_training_service.classroom_storage is window.classroom_storage
+        assert window.competition_service.classroom_storage is window.classroom_storage
         window.collection_page.anonymous_id_edit.setText("group_old")
         window.game_mapping_service.swap_commands()
         window.game_mapping_service.set_control_preferences("high", "stable")

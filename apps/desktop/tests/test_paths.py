@@ -15,6 +15,7 @@ def test_defaults_use_repository_data_locations(tmp_path):
     )
     assert paths.models_root == tmp_path / "apps" / "desktop" / "models"
     assert paths.reports_root == tmp_path / "apps" / "desktop" / "reports"
+    assert paths.classroom_root == tmp_path / "data" / "classroom"
 
 
 def test_cli_values_override_config_environment_and_defaults(tmp_path):
@@ -25,6 +26,7 @@ def test_cli_values_override_config_environment_and_defaults(tmp_path):
                 "dataset_root": "config/dataset",
                 "recordings_root": "config/recordings",
                 "artifacts_root": "config/artifacts",
+                "classroom_root": "config/classroom",
             }
         ),
         encoding="utf-8",
@@ -33,16 +35,19 @@ def test_cli_values_override_config_environment_and_defaults(tmp_path):
         project_root=tmp_path,
         paths_config=config,
         dataset_root="cli/dataset",
+        classroom_root="cli/classroom",
         environ={
             "EMG_DATASET_ROOT": "env/dataset",
             "EMG_RECORDINGS_ROOT": "env/recordings",
             "EMG_ARTIFACTS_ROOT": "env/artifacts",
+            "EMG_CLASSROOM_ROOT": "env/classroom",
         },
     )
 
     assert paths.dataset_root == tmp_path / "cli" / "dataset"
     assert paths.recordings_root == tmp_path / "config" / "recordings"
     assert paths.artifacts_root == tmp_path / "config" / "artifacts"
+    assert paths.classroom_root == tmp_path / "cli" / "classroom"
 
 
 def test_environment_values_override_legacy_defaults(tmp_path):
@@ -52,12 +57,14 @@ def test_environment_values_override_legacy_defaults(tmp_path):
             "EMG_DATASET_ROOT": "env/dataset",
             "EMG_RECORDINGS_ROOT": "env/recordings",
             "EMG_ARTIFACTS_ROOT": "env/artifacts",
+            "EMG_CLASSROOM_ROOT": "env/classroom",
         },
     )
 
     assert paths.dataset_root == tmp_path / "env" / "dataset"
     assert paths.recordings_root == tmp_path / "env" / "recordings"
     assert paths.artifacts_root == tmp_path / "env" / "artifacts"
+    assert paths.classroom_root == tmp_path / "env" / "classroom"
 
 
 def test_relative_values_are_resolved_from_project_root_not_cwd(tmp_path, monkeypatch):

@@ -30,6 +30,7 @@ from emg_live_marker.device.check_service import (
 )
 from emg_live_marker.paths import ProjectPaths, resolve_project_paths
 from emg_live_marker.realtime.collection import CollectionController, CollectionPlan
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage
 from emg_live_marker.realtime.game_mapping import GameMappingService
 from emg_live_marker.realtime.student_game_experience import StudentGameExperienceService
 from emg_live_marker.realtime.student_observation import StudentObservationService
@@ -119,6 +120,10 @@ class StudentMainWindow(QMainWindow):
             self.paths, classroom_settings_path=classroom_settings_path
         )
         self.course = self.course_config["course"]
+        self.classroom_storage = ClassroomStorage.from_config(
+            self.paths.classroom_root,
+            self.course_config,
+        )
         self.course_entries = COURSE_ENTRIES
         self.course_entry_buttons: list[QPushButton] = []
         self._entry_page_indexes: dict[str, int] = {}
@@ -132,6 +137,7 @@ class StudentMainWindow(QMainWindow):
         self._collection_side: str | None = None
         self.collection_controller = CollectionController(
             device_ready=self._selected_side_ready,
+            classroom_storage=self.classroom_storage,
             parent=self,
         )
         self.collection_controller.state_changed.connect(self._on_collection_snapshot)
@@ -143,6 +149,7 @@ class StudentMainWindow(QMainWindow):
         )
         self.game_mapping_service = game_mapping_service or GameMappingService(
             self.course_config,
+            classroom_storage=self.classroom_storage,
             parent=self,
         )
         preferences = self.game_mapping_service.control_preferences
@@ -168,6 +175,7 @@ class StudentMainWindow(QMainWindow):
             self.course_config,
             self.observation_service,
             self.game_mapping_service,
+            classroom_storage=self.classroom_storage,
             parent=self,
         )
         self.game_experience_service = game_experience_service or StudentGameExperienceService(
@@ -186,10 +194,14 @@ class StudentMainWindow(QMainWindow):
                 self.paths.dataset_root,
                 self.course_config,
                 self.observation_service,
+                classroom_storage=self.classroom_storage,
                 parent=self,
             )
         )
         self.device_check_service.emg_packets_received.connect(self._on_device_emg_packets)
+        active_group = self.game_mapping_service.current_group_id
+        if active_group:
+            self.personal_training_service.restore_model_selection(active_group)
 
         self.setWindowTitle(f"{self.course['name']} - 学生模式")
         self.resize(1000, 720)
@@ -348,6 +360,12 @@ class StudentMainWindow(QMainWindow):
         if entry.identifier == "train-model":
             self.personal_training_page.activate()
         if entry.identifier == "challenge":
+            group_id = self._current_anonymous_group_id()
+            if group_id:
+                loaded, _message = self.game_mapping_service.load_group(group_id)
+                if not loaded:
+                    self.game_mapping_service.save_current_group(group_id)
+                self.personal_training_service.restore_model_selection(group_id)
             self.challenge_page.activate()
         self._stack.setCurrentIndex(self._entry_page_indexes[entry.identifier])
 
@@ -408,6 +426,10 @@ class StudentMainWindow(QMainWindow):
             self.collection_page.message_label.setText("课程动作配置无效，请联系老师")
             return
         self._collection_side = side
+        loaded, _message = self.game_mapping_service.load_group(anonymous_id)
+        if not loaded:
+            self.game_mapping_service.save_current_group(anonymous_id)
+        self.personal_training_service.restore_model_selection(anonymous_id)
         plan = CollectionPlan(
             subject_id=anonymous_id,
             side=side,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +14,7 @@ from typing import BinaryIO, TextIO
 from emg_live_marker.config import DEFAULT_BAUDRATE
 from emg_live_marker.device.protocol import EMG_CHANNELS, EMG_FS, IMU_FS, EmgPacket, ImuPacket
 from emg_live_marker.paths import resolve_project_paths
+from emg_live_marker.realtime.classroom_storage import ClassroomStorage
 
 
 @dataclass(frozen=True)
@@ -76,10 +76,7 @@ class SessionRecorder:
                 "created_at": created_at,
                 "software": "emg_live_marker",
             }
-        (session_dir / "metadata.json").write_text(
-            json.dumps(metadata, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        ClassroomStorage.atomic_write_json(session_dir / "metadata.json", metadata)
 
         self._emg_file = (session_dir / "emg.csv").open("w", newline="", encoding="utf-8")
         self._imu_file = (session_dir / "imu.csv").open("w", newline="", encoding="utf-8")
