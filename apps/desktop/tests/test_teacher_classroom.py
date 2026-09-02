@@ -21,6 +21,7 @@ from emg_live_marker.realtime.teacher_classroom import (
     merge_classroom_overrides,
 )
 from emg_live_marker.ui.main_window import MainWindow
+import emg_live_marker.ui.main_window as main_window_module
 from emg_live_marker.ui.student_window import StudentMainWindow, load_yucai_course_config
 
 
@@ -336,6 +337,41 @@ def test_existing_main_window_remains_teacher_window_with_reused_port_controls(a
         window._classroom_dock._assign_port("left")
         assert called == [window._port_combo.currentText()]
         assert not hasattr(window._teacher_classroom_service, "serial_source")
+    finally:
+        window.close()
+
+
+def test_classroom_port_candidates_follow_mainwindow_refresh(app, monkeypatch) -> None:
+    ports = ["COM6", "COM12", "COM13"]
+    monkeypatch.setattr(main_window_module, "list_serial_ports", lambda: list(ports))
+    monkeypatch.setattr(MainWindow, "_load_game_model", lambda _self: None)
+    window = MainWindow(simulate=False, paths=resolve_project_paths())
+    try:
+        dock = window._classroom_dock
+        assert [dock.left_port_combo.itemText(index) for index in range(dock.left_port_combo.count())] == ports
+        assert [dock.right_port_combo.itemText(index) for index in range(dock.right_port_combo.count())] == ports
+
+        window._port_combo.setCurrentText("COM6")
+        window._right_port_combo.setCurrentText("COM13")
+        dock.left_port_combo.setCurrentText("COM6")
+        dock.right_port_combo.setCurrentText("COM13")
+        ports[:] = ["COM6", "COM7"]
+        window._refresh_ports_button.click()
+
+        assert [window._port_combo.itemText(index) for index in range(window._port_combo.count())] == ports
+        assert [window._right_port_combo.itemText(index) for index in range(window._right_port_combo.count())] == ports
+        assert [dock.left_port_combo.itemText(index) for index in range(dock.left_port_combo.count())] == ports
+        assert [dock.right_port_combo.itemText(index) for index in range(dock.right_port_combo.count())] == ports
+        assert window._port_combo.currentText() == "COM6"
+        assert dock.left_port_combo.currentText() == "COM6"
+        assert window._right_port_combo.currentText() == ""
+        assert dock.right_port_combo.currentText() == ""
+        assert "右手" in dock.ports_message.text()
+
+        dock.left_port_combo.setCurrentText("COM6")
+        dock.right_port_combo.setCurrentText("COM7")
+        assert dock.left_port_combo.currentText() == "COM6"
+        assert dock.right_port_combo.currentText() == "COM7"
     finally:
         window.close()
 

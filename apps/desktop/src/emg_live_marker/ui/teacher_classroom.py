@@ -87,6 +87,12 @@ class TeacherClassroomDock(QDockWidget):
         self.left_assign_button.clicked.connect(lambda: self._assign_port("left"))
         self.right_assign_button.clicked.connect(lambda: self._assign_port("right"))
         layout.addLayout(assignment)
+        self.ports_message = QLabel("")
+        self.ports_message.setWordWrap(True)
+        layout.addWidget(self.ports_message)
+        refresh_ports = QPushButton("刷新端口")
+        refresh_ports.clicked.connect(self.refresh_ports)
+        layout.addWidget(refresh_ports)
 
         self.next_group_button = QPushButton("准备下一组学生")
         self.next_group_button.clicked.connect(self._prepare_next_group)
@@ -196,15 +202,35 @@ class TeacherClassroomDock(QDockWidget):
 
     def refresh_ports(self) -> None:
         self.main_window._refresh_ports()
+        # MainWindow performs the scan and calls sync_port_candidates(), so this
+        # method never creates a second serial discovery or connection path.
+
+    def sync_port_candidates(self, ports: list[str]) -> None:
+        """Mirror MainWindow's latest port scan while retaining only valid choices."""
+
+        invalid_sides: list[str] = []
         for source, target in (
             (self.main_window._port_combo, self.left_port_combo),
             (self.main_window._right_port_combo, self.right_port_combo),
         ):
             current = target.currentText()
             target.clear()
-            target.addItems([source.itemText(index) for index in range(source.count())])
-            if current:
+            target.addItems(ports)
+            if current and current in ports:
                 target.setCurrentText(current)
+            elif current:
+                target.setCurrentIndex(-1)
+                target.setEditText("")
+                invalid_sides.append("左手" if target is self.left_port_combo else "右手")
+            else:
+                target.setCurrentIndex(-1)
+                target.setEditText("")
+        if invalid_sides:
+            self.ports_message.setText(
+                f"{'、'.join(invalid_sides)}当前选择的端口已不存在，已清除选择。"
+            )
+        else:
+            self.ports_message.setText("")
 
     def refresh_sessions(self) -> None:
         sessions = self.service.scan_sessions()

@@ -266,9 +266,6 @@ class MainWindow(QMainWindow):
             if self._port_combo.findText(port) < 0:
                 self._port_combo.addItem(port)
             self._port_combo.setCurrentText(port)
-        if self._right_port_combo.count() == 0:
-            self._right_port_combo.addItem("COM5")
-
         self._plot_timer = QTimer(self)
         self._plot_timer.setInterval(50)
         self._plot_timer.timeout.connect(self._refresh_waveform)
@@ -876,18 +873,28 @@ class MainWindow(QMainWindow):
         current_left = self._port_combo.currentText().strip()
         current_right = self._right_port_combo.currentText().strip()
         ports = list_serial_ports()
-        for combo, current, fallback in [
-            (self._port_combo, current_left, "COM4"),
-            (self._right_port_combo, current_right, "COM5"),
+        invalid_sides: list[str] = []
+        for combo, current, side in [
+            (self._port_combo, current_left, "left"),
+            (self._right_port_combo, current_right, "right"),
         ]:
             combo.clear()
             combo.addItems(ports)
-            if current and combo.findText(current) < 0:
-                combo.addItem(current)
-            if combo.count() == 0:
-                combo.addItem(fallback)
-            if current:
+            if current and current in ports:
                 combo.setCurrentText(current)
+            elif current:
+                combo.setCurrentIndex(-1)
+                combo.setEditText("")
+                invalid_sides.append(side)
+            else:
+                combo.setCurrentIndex(-1)
+                combo.setEditText("")
+        if invalid_sides:
+            names = "、".join("左手" if side == "left" else "右手" for side in invalid_sides)
+            self.statusBar().showMessage(f"{names}当前选择的端口已不存在，已清除选择。", 5000)
+        dock = getattr(self, "_classroom_dock", None)
+        if dock is not None:
+            dock.sync_port_candidates(ports)
 
     def _connect(self) -> None:
         self._reset_data_streams(clear_raw=True)
