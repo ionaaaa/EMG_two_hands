@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from emg_live_marker.config import DEFAULT_DISPLAY_OUTLIER_UV
 from emg_live_marker.device.protocol import EMG_FS
+from emg_live_marker.realtime.signal_processing import Y_RANGE_OPTIONS, normalize_y_range_option
 
 DISPLAY_OUTLIER_UV = DEFAULT_DISPLAY_OUTLIER_UV
 WAVEFORM_LEFT_AXIS_WIDTH = 60
@@ -124,17 +125,9 @@ class MultiChannelWaveformView(QWidget):
         self.display_seconds = float(seconds)
 
     def set_y_range_mode(self, mode: str) -> None:
-        range_map = {
-            "Auto": None,
-            "Auto robust": None,
-            "+/-250 uV": 250.0,
-            "+/-500 uV": 500.0,
-            "+/-1000 uV": 1000.0,
-            "+/-2000 uV": 2000.0,
-            "+/-5000 uV": 5000.0,
-        }
+        mode = normalize_y_range_option(mode)
         self._auto_robust = mode == "Auto robust"
-        self._y_range_uv = range_map.get(mode, None)
+        self._y_range_uv = Y_RANGE_OPTIONS[mode]
         for plot in self._plots:
             if self._y_range_uv is None and not self._auto_robust:
                 plot.enableAutoRange(axis=pg.ViewBox.YAxis, enable=True)

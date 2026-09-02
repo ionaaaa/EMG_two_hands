@@ -57,7 +57,9 @@ from emg_live_marker.realtime.recorder import SessionRecorder
 from emg_live_marker.realtime.ring_buffer import EmgRingBuffer, ImuRingBuffer
 from emg_live_marker.realtime.signal_processing import (
     NOTCH_OPTIONS,
+    Y_RANGE_OPTIONS,
     normalize_notch_option,
+    normalize_y_range_option,
     notch_spec_from_option,
 )
 from emg_live_marker.realtime.stream_processor import StreamingEMGProcessor
@@ -248,6 +250,7 @@ class MainWindow(QMainWindow):
             self._prepare_next_student_group
         )
         self._restore_teacher_signal_processing()
+        self._restore_teacher_display_settings()
         self._classroom_dock = TeacherClassroomDock(
             self._teacher_classroom_service,
             self,
@@ -773,9 +776,7 @@ class MainWindow(QMainWindow):
         self._mode_combo = QComboBox()
         self._mode_combo.addItems(["Raw", "Filtered", "Rectified", "RMS"])
         self._y_range_combo = QComboBox()
-        self._y_range_combo.addItems(
-            ["Auto", "Auto robust", "+/-250 uV", "+/-500 uV", "+/-1000 uV", "+/-2000 uV", "+/-5000 uV"]
-        )
+        self._y_range_combo.addItems(list(Y_RANGE_OPTIONS))
 
         form.addRow("Display window", self._window_combo)
         form.addRow("Display mode", self._mode_combo)
@@ -783,8 +784,7 @@ class MainWindow(QMainWindow):
 
         self._window_combo.currentTextChanged.connect(self._set_display_window)
         self._mode_combo.currentTextChanged.connect(self._set_display_mode)
-        self._y_range_combo.currentTextChanged.connect(self._waveform_view.set_y_range_mode)
-        self._y_range_combo.currentTextChanged.connect(self._right_waveform_view.set_y_range_mode)
+        self._y_range_combo.currentTextChanged.connect(self._set_y_range)
         return box
 
     def _build_signal_group(self) -> QGroupBox:
@@ -1274,6 +1274,16 @@ class MainWindow(QMainWindow):
     def _set_display_mode(self, value: str) -> None:
         self._display_mode = value
 
+    def _set_y_range(self, value: str) -> None:
+        option = normalize_y_range_option(value)
+        self._waveform_view.set_y_range_mode(option)
+        self._right_waveform_view.set_y_range_mode(option)
+        service = getattr(self, "_teacher_classroom_service", None)
+        if service is not None:
+            saved, message = service.save_display_settings(option)
+            if not saved:
+                self.statusBar().showMessage(message or "波形显示设置保存失败。", 5000)
+
     def _set_notch(self, value: str) -> None:
         option = normalize_notch_option(value)
         notch = notch_spec_from_option(option)
@@ -1295,6 +1305,14 @@ class MainWindow(QMainWindow):
         for runtime in self._runtimes.values():
             runtime.stream_processor.update_config(notch_freq=notch)
         self._clear_processed_buffers()
+
+    def _restore_teacher_display_settings(self) -> None:
+        option = self._teacher_classroom_service.display_settings["y_range"]
+        self._y_range_combo.blockSignals(True)
+        self._y_range_combo.setCurrentText(option)
+        self._y_range_combo.blockSignals(False)
+        self._waveform_view.set_y_range_mode(option)
+        self._right_waveform_view.set_y_range_mode(option)
 
     def _browse_game_model(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(

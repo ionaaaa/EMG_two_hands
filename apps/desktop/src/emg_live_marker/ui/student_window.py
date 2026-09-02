@@ -39,6 +39,7 @@ from emg_live_marker.realtime.student_control_optimization import StudentControl
 from emg_live_marker.realtime.student_competition import StudentCompetitionService
 from emg_live_marker.realtime.teacher_classroom import (
     load_bracelet_assignment,
+    load_display_settings,
     load_signal_processing,
     merge_classroom_overrides,
 )
@@ -134,6 +135,7 @@ class StudentMainWindow(QMainWindow):
         self._entry_page_indexes: dict[str, int] = {}
         self.bracelet_assignment = load_bracelet_assignment(classroom_settings_path)
         self.signal_processing = load_signal_processing(classroom_settings_path)
+        self.display_settings = load_display_settings(classroom_settings_path)
         assigned_provider = (
             AssignedSerialDeviceProvider(
                 self.bracelet_assignment["left_port"],
@@ -265,6 +267,7 @@ class StudentMainWindow(QMainWindow):
                 self.signal_observation_page = StudentSignalObservationPage(
                     self.observation_service,
                     self.show_home,
+                    y_range_mode=self.display_settings["y_range"],
                 )
                 self._entry_page_indexes[entry.identifier] = self._stack.addWidget(
                     self.signal_observation_page

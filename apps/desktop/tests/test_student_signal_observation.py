@@ -20,7 +20,11 @@ from emg_live_marker.device.check_service import (
 )
 from emg_live_marker.paths import resolve_project_paths
 from emg_live_marker.realtime.student_observation import StudentObservationService
-from emg_live_marker.realtime.signal_processing import notch_spec_from_option
+from emg_live_marker.realtime.signal_processing import (
+    Y_RANGE_OPTIONS,
+    normalize_y_range_option,
+    notch_spec_from_option,
+)
 from emg_live_marker.ui.student_pages import StudentSignalObservationPage
 from emg_live_marker.ui.student_window import StudentMainWindow
 from emg_live_marker.ui.waveform_view import MultiChannelWaveformView
@@ -230,6 +234,28 @@ def test_page_exposes_only_three_student_modes_and_chinese_results(app, tmp_path
         page.stop()
         page.close()
     assert not page._timer.isActive()
+
+
+@pytest.mark.parametrize("mode", list(Y_RANGE_OPTIONS))
+def test_teacher_y_range_is_applied_to_both_student_views_only(app, tmp_path, mode) -> None:
+    service = StudentObservationService(
+        tmp_path,
+        observation_config(tmp_path / "missing.pt"),
+    )
+    packets = [Packet(0.0, 0, np.ones(8)), Packet(0.004, 1, np.ones(8) * 2)]
+    service.on_emg_packets("left", packets)
+    before = service.display_window("left", "raw")[1].copy()
+    page = StudentSignalObservationPage(service, lambda: None, y_range_mode=mode)
+    try:
+        expected = Y_RANGE_OPTIONS[normalize_y_range_option(mode)]
+        assert page.left_waveform_view._y_range_uv == expected
+        assert page.right_waveform_view._y_range_uv == expected
+        assert page.left_waveform_view._auto_robust is (mode == "Auto robust")
+        assert page.right_waveform_view._auto_robust is (mode == "Auto robust")
+        page.refresh_waveforms()
+        np.testing.assert_array_equal(service.display_window("left", "raw")[1], before)
+    finally:
+        page.close()
 
 
 def _healthy_single_hand_result() -> DeviceCheckResult:

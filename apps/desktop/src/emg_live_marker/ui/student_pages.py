@@ -943,6 +943,8 @@ class StudentSignalObservationPage(QWidget):
         self,
         service: StudentObservationService,
         go_home: Callable[[], None],
+        *,
+        y_range_mode: str = "Auto",
     ) -> None:
         super().__init__()
         self.setObjectName("student-signal-observation-page")
@@ -981,6 +983,8 @@ class StudentSignalObservationPage(QWidget):
         hands.setSpacing(12)
         self.left_waveform_view, left_panel = self._build_hand_panel("left", "左手")
         self.right_waveform_view, right_panel = self._build_hand_panel("right", "右手")
+        self.left_waveform_view.set_y_range_mode(y_range_mode)
+        self.right_waveform_view.set_y_range_mode(y_range_mode)
         hands.addWidget(left_panel, 1)
         hands.addWidget(right_panel, 1)
         layout.addLayout(hands, 1)

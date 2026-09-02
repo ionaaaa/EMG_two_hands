@@ -13,6 +13,16 @@ NOTCH_OPTIONS: dict[str, tuple[float, ...]] = {
     "60+120Hz": (60.0, 120.0),
 }
 
+Y_RANGE_OPTIONS: dict[str, float | None] = {
+    "Auto": None,
+    "Auto robust": None,
+    "+/-250 uV": 250.0,
+    "+/-500 uV": 500.0,
+    "+/-1000 uV": 1000.0,
+    "+/-2000 uV": 2000.0,
+    "+/-5000 uV": 5000.0,
+}
+
 
 def normalize_notch_option(value: object) -> str:
     """Return a supported persisted notch choice, defaulting safely to Off."""
@@ -28,3 +38,8 @@ def notch_spec_from_option(value: object) -> NotchSpec:
     if not frequencies:
         return None
     return frequencies[0] if len(frequencies) == 1 else frequencies
+
+
+def normalize_y_range_option(value: object) -> str:
+    option = str(value).strip()
+    return option if option in Y_RANGE_OPTIONS else "Auto"

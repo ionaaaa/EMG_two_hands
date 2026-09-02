@@ -20,6 +20,7 @@ from emg_live_marker.realtime.teacher_classroom import (
     TeacherClassroomService,
     default_classroom_settings_path,
     load_bracelet_assignment,
+    load_display_settings,
     load_signal_processing,
     merge_classroom_overrides,
 )
@@ -123,7 +124,9 @@ def test_signal_processing_setting_persists_and_survives_other_classroom_saves(t
     settings_path = tmp_path / "app-data" / "classroom_settings.json"
     service, _paths, _config, model = make_service(tmp_path, settings_path=settings_path)
     assert service.save_signal_processing("50+100Hz")[0]
+    assert service.save_display_settings("+/-2000 uV")[0]
     assert load_signal_processing(settings_path) == {"notch": "50+100Hz"}
+    assert load_display_settings(settings_path) == {"y_range": "+/-2000 uV"}
     assert service.save_bracelet_assignment("COM6", "COM7")[0]
     assert service.save_settings(
         standard_model_path=model,
@@ -132,6 +135,7 @@ def test_signal_processing_setting_persists_and_survives_other_classroom_saves(t
     )[0]
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
     assert payload["signal_processing"] == {"notch": "50+100Hz"}
+    assert payload["display"] == {"y_range": "+/-2000 uV"}
 
 
 def test_bracelet_assignment_rejects_same_or_empty_port(tmp_path) -> None:
@@ -147,6 +151,7 @@ def test_student_window_uses_saved_machine_bracelet_assignment(app, tmp_path) ->
     service, _paths, _config, _model = make_service(tmp_path, settings_path=settings_path)
     assert service.save_bracelet_assignment("COM6", "COM7")[0]
     assert service.save_signal_processing("60+120Hz")[0]
+    assert service.save_display_settings("+/-1000 uV")[0]
 
     window = StudentMainWindow(
         paths=resolve_project_paths(),
@@ -160,6 +165,8 @@ def test_student_window_uses_saved_machine_bracelet_assignment(app, tmp_path) ->
         assert window.observation_service.notch_option == "60+120Hz"
         assert window.observation_service._runtime["left"].processor.config.notch_freq == (60.0, 120.0)
         assert window.observation_service._runtime["right"].processor.config.notch_freq == (60.0, 120.0)
+        assert window.signal_observation_page.left_waveform_view._y_range_uv == 1000.0
+        assert window.signal_observation_page.right_waveform_view._y_range_uv == 1000.0
     finally:
         window.close()
 
