@@ -18,6 +18,10 @@ from emg_live_marker.device.protocol import EMG_CHANNELS, EMG_FS
 from emg_live_marker.ml.gesture_model import load_model
 from emg_live_marker.ml.realtime_decoder import RealtimeGestureDecoder
 from emg_live_marker.realtime.ring_buffer import EmgRingBuffer
+from emg_live_marker.realtime.signal_processing import (
+    normalize_notch_option,
+    notch_spec_from_option,
+)
 from emg_live_marker.realtime.stream_processor import StreamingEMGProcessor
 
 STUDENT_DISPLAY_MODES = ("raw", "filtered", "rms")
@@ -75,6 +79,7 @@ class StudentObservationService(QObject):
         course_config: dict[str, Any],
         *,
         model_loader: Callable[[str | Path], Any] | None = None,
+        notch_option: object = "Off",
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -92,6 +97,7 @@ class StudentObservationService(QObject):
         self._model_load_attempted = False
         self.model_error = ""
         self.active = False
+        self.notch_option = normalize_notch_option(notch_option)
         self.ready_sides = {"left": False, "right": False}
         self._runtime = {
             side: _SideRuntime(
@@ -102,6 +108,9 @@ class StudentObservationService(QObject):
             )
             for side in ("left", "right")
         }
+        notch = notch_spec_from_option(self.notch_option)
+        for runtime in self._runtime.values():
+            runtime.processor.update_config(notch_freq=notch)
 
     @property
     def predictor(self) -> Any | None:

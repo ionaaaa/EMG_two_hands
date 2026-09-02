@@ -49,9 +49,11 @@ class FakeSource(QObject):
         self.rates = rates
         self.started = 0
         self.stopped = 0
+        self.running = False
 
     def start(self) -> None:
         self.started += 1
+        self.running = True
         self.connected.emit("fake")
         if self.packets:
             self.emg_packets.emit(self.packets)
@@ -60,7 +62,11 @@ class FakeSource(QObject):
 
     def stop(self) -> None:
         self.stopped += 1
+        self.running = False
         self.disconnected.emit()
+
+    def is_running(self) -> bool:
+        return self.running
 
 
 @pytest.fixture(scope="module")
@@ -282,6 +288,51 @@ def test_disconnection_after_completion_updates_result(app, thresholds) -> None:
         app.processEvents()
         assert service.result.left.connection is ConnectionState.DISCONNECTED
         assert service.result.collection_ready is False
+    finally:
+        service.close()
+
+
+def test_observation_keeps_verified_two_hand_sources_and_recovers_only_right(app, thresholds) -> None:
+    service, sources = run_check(
+        app,
+        thresholds,
+        [DeviceDescriptor("COM6", "left"), DeviceDescriptor("COM7", "right")],
+    )
+    try:
+        left_source, right_source = sources
+        service.ensure_checked_sources_running()
+        assert len(sources) == 2
+        assert left_source.started == 1 and right_source.started == 1
+
+        right_source.disconnected.emit()
+        QTest.qWait(150)
+        app.processEvents()
+        assert len(sources) == 3
+        assert left_source.started == 1 and left_source.stopped == 0
+        assert right_source.stopped >= 1
+        assert sources[-1].started == 1
+        assert service.result.left.ready_for_collection is True
+        assert service.result.right.ready_for_collection is True
+    finally:
+        service.close()
+
+
+def test_observation_recovery_never_uses_unassigned_ports(app, thresholds) -> None:
+    available_ports = ["COM6", "COM7"]
+    provider = AssignedSerialDeviceProvider(
+        "COM6", "COM7",
+        port_lister=lambda: list(available_ports),
+    )
+    service, sources = run_assigned_check(app, thresholds, provider)
+    try:
+        assert len(sources) == 2
+        sources[1].disconnected.emit()
+        available_ports[:] = ["COM6", "COM12", "COM13"]
+        app.processEvents()
+        service.ensure_checked_sources_running()
+        assert len(sources) == 2
+        assert service.result.left.ready_for_collection is True
+        assert service.result.right.ready_for_collection is False
     finally:
         service.close()
 

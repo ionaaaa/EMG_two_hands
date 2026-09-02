@@ -203,6 +203,9 @@ class DeviceCheckService(QObject):
         self._signal_handlers: list[Callable[..., object]] = []
         self._descriptors: dict[BraceletSide, DeviceDescriptor] = {}
         self._connected: dict[BraceletSide, bool] = {"left": False, "right": False}
+        self._verified_sides: dict[BraceletSide, bool] = {"left": False, "right": False}
+        self._recovery_attempts: dict[BraceletSide, int] = {"left": 0, "right": 0}
+        self._recovery_pending = False
         self._samples: dict[BraceletSide, list[np.ndarray]] = {"left": [], "right": []}
         self._first_emg_at: dict[BraceletSide, float | None] = {"left": None, "right": None}
         self._rates: dict[BraceletSide, list[float]] = {"left": [], "right": []}
@@ -248,6 +251,9 @@ class DeviceCheckService(QObject):
         self._signal_handlers.clear()
         self._descriptors.clear()
         self._connected = {"left": False, "right": False}
+        self._verified_sides = {"left": False, "right": False}
+        self._recovery_attempts = {"left": 0, "right": 0}
+        self._recovery_pending = False
 
     def close(self) -> None:
         self.stop()
@@ -377,6 +383,10 @@ class DeviceCheckService(QObject):
     def _on_connected(self, side: BraceletSide | None) -> None:
         if side is not None:
             self._connected[side] = True
+            self._recovery_attempts[side] = 0
+            if not self._checking and side in self._descriptors:
+                self.result = self._build_result(checking=False, message=None)
+                self.result_changed.emit(self.result)
 
     def _on_disconnected(self, side: BraceletSide) -> None:
         self._connected[side] = False
@@ -385,6 +395,74 @@ class DeviceCheckService(QObject):
         else:
             self.result = self._build_result(checking=False, message=None)
             self.result_changed.emit(self.result)
+            self._schedule_recovery(side)
+
+    def _schedule_recovery(self, side: BraceletSide) -> None:
+        if (
+            not self._verified_sides[side]
+            or self._recovery_attempts[side] >= 1
+            or self._recovery_pending
+        ):
+            return
+        self._recovery_attempts[side] += 1
+        self._recovery_pending = True
+        QTimer.singleShot(100, self._run_scheduled_recovery)
+
+    def _run_scheduled_recovery(self) -> None:
+        self._recovery_pending = False
+        if not self._checking:
+            self.ensure_checked_sources_running()
+
+    def ensure_checked_sources_running(self) -> DeviceCheckResult:
+        """Retain verified assigned streams for observation without side guessing."""
+
+        if self._checking or not self._descriptors:
+            return self.result
+        available = self._available_assigned_descriptors()
+        recovered = False
+        for side, verified in self._verified_sides.items():
+            if not verified:
+                continue
+            descriptor = self._descriptors.get(side)
+            if descriptor is None or available.get(side) != descriptor:
+                continue
+            source = self._sources.get(side)
+            if self._source_is_running(side, source):
+                continue
+            if source is not None:
+                self._stop_source(source)
+            replacement = self.source_factory(descriptor, side, self)
+            self._sources[side] = replacement
+            self._connected[side] = False
+            self._connect_source(replacement, side)
+            self._start_source(replacement, descriptor)
+            recovered = True
+
+        if recovered:
+            self.result = self._build_result(checking=False, message=None)
+            self.result_changed.emit(self.result)
+        return self.result
+
+    def _available_assigned_descriptors(self) -> dict[BraceletSide, DeviceDescriptor]:
+        if self.simulate:
+            return dict(self._descriptors)
+        try:
+            candidates = self.provider.list_devices()
+        except Exception:  # noqa: BLE001 - provider implementations are external.
+            return {}
+        available: dict[BraceletSide, DeviceDescriptor] = {}
+        for descriptor in candidates:
+            if descriptor.side is not None and descriptor.side not in available:
+                available[descriptor.side] = descriptor
+        return available
+
+    def _source_is_running(self, side: BraceletSide, source: object | None) -> bool:
+        if source is None or not self._connected[side]:
+            return False
+        if isinstance(source, SerialSource):
+            return source.is_running()
+        running = getattr(source, "is_running", None)
+        return bool(running()) if callable(running) else True
 
     def _on_emg(self, side: BraceletSide, packets: Sequence[object]) -> None:
         values = [np.asarray(getattr(packet, "values_uv", ()), dtype=np.float64) for packet in packets]
@@ -412,6 +490,10 @@ class DeviceCheckService(QObject):
         self._checking = False
         self._finish_timer.stop()
         self.result = self._build_result(checking=False, message=message)
+        self._verified_sides = {
+            "left": self.result.left.ready_for_collection,
+            "right": self.result.right.ready_for_collection,
+        }
         self.result_changed.emit(self.result)
 
     def _build_result(self, *, checking: bool, message: str | None) -> DeviceCheckResult:

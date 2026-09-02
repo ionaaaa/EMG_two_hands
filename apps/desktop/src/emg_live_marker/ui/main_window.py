@@ -55,6 +55,11 @@ from emg_live_marker.realtime.collection import (
 from emg_live_marker.realtime.gesture_server import GestureServer
 from emg_live_marker.realtime.recorder import SessionRecorder
 from emg_live_marker.realtime.ring_buffer import EmgRingBuffer, ImuRingBuffer
+from emg_live_marker.realtime.signal_processing import (
+    NOTCH_OPTIONS,
+    normalize_notch_option,
+    notch_spec_from_option,
+)
 from emg_live_marker.realtime.stream_processor import StreamingEMGProcessor
 from emg_live_marker.realtime.teacher_classroom import (
     TeacherClassroomService,
@@ -64,13 +69,6 @@ from emg_live_marker.ui.style import APP_QSS
 from emg_live_marker.ui.teacher_classroom import TeacherClassroomDock
 from emg_live_marker.ui.waveform_view import MultiChannelWaveformView
 
-NOTCH_OPTIONS: dict[str, tuple[float, ...]] = {
-    "Off": (),
-    "50Hz": (50.0,),
-    "50+100Hz": (50.0, 100.0),
-    "60Hz": (60.0,),
-    "60+120Hz": (60.0, 120.0),
-}
 DEFAULT_EFFIE_GAME_MODEL_RELATIVE_PATH = Path("effie_real_full_v2_continue") / "gesture_classifier.ts"
 CALIBRATION_MODEL_RELATIVE_PATH = Path("calibration_game_model") / "gesture_classifier.ts"
 FALLBACK_GAME_MODEL_RELATIVE_PATH = Path("gesture_classifier.pt")
@@ -249,6 +247,7 @@ class MainWindow(QMainWindow):
         self._teacher_classroom_service.runtime_reset_requested.connect(
             self._prepare_next_student_group
         )
+        self._restore_teacher_signal_processing()
         self._classroom_dock = TeacherClassroomDock(
             self._teacher_classroom_service,
             self,
@@ -1276,8 +1275,23 @@ class MainWindow(QMainWindow):
         self._display_mode = value
 
     def _set_notch(self, value: str) -> None:
-        notch_freqs = NOTCH_OPTIONS.get(value, ())
-        notch = notch_freqs or None
+        option = normalize_notch_option(value)
+        notch = notch_spec_from_option(option)
+        for runtime in self._runtimes.values():
+            runtime.stream_processor.update_config(notch_freq=notch)
+        self._clear_processed_buffers()
+        service = getattr(self, "_teacher_classroom_service", None)
+        if service is not None:
+            saved, message = service.save_signal_processing(option)
+            if not saved:
+                self.statusBar().showMessage(message or "信号处理设置保存失败。", 5000)
+
+    def _restore_teacher_signal_processing(self) -> None:
+        option = self._teacher_classroom_service.signal_processing["notch"]
+        self._notch_combo.blockSignals(True)
+        self._notch_combo.setCurrentText(option)
+        self._notch_combo.blockSignals(False)
+        notch = notch_spec_from_option(option)
         for runtime in self._runtimes.values():
             runtime.stream_processor.update_config(notch_freq=notch)
         self._clear_processed_buffers()

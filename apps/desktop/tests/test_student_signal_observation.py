@@ -8,16 +8,19 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
 
 from emg_live_marker.device.check_service import (
     CheckReason,
     ConnectionState,
     DeviceCheckResult,
     DeviceCheckService,
+    DeviceCheckThresholds,
     SideCheckResult,
 )
 from emg_live_marker.paths import resolve_project_paths
 from emg_live_marker.realtime.student_observation import StudentObservationService
+from emg_live_marker.realtime.signal_processing import notch_spec_from_option
 from emg_live_marker.ui.student_pages import StudentSignalObservationPage
 from emg_live_marker.ui.student_window import StudentMainWindow
 from emg_live_marker.ui.waveform_view import MultiChannelWaveformView
@@ -56,6 +59,10 @@ class Predictor:
     def predict_window(self, _window: np.ndarray) -> dict:
         probs = {"rest": 0.1, "fist": 0.7, "open-palm": 0.15, "pinch": 0.05}
         return {"gesture": "fist", "confidence": 0.7, "probs": probs}
+
+
+class RawPredictor(Predictor):
+    signal_type = "raw"
 
 
 def test_service_reuses_stream_processing_and_loads_one_shared_model(tmp_path) -> None:
@@ -109,6 +116,54 @@ def test_missing_model_keeps_waveforms_and_never_starts_demo_decoder(tmp_path) -
         assert service.decoder_for("left") is None
         assert "模型缺失" in service.model_error
         assert service.display_window("left", "raw")[1].shape == (2, 8)
+    finally:
+        service.stop()
+
+
+@pytest.mark.parametrize(
+    ("option", "expected"),
+    [
+        ("Off", None),
+        ("50Hz", (50.0,)),
+        ("50+100Hz", (50.0, 100.0)),
+        ("60Hz", (60.0,)),
+        ("60+120Hz", (60.0, 120.0)),
+    ],
+)
+def test_observation_processors_share_the_teacher_notch_option(tmp_path, option, expected) -> None:
+    model_path = tmp_path / "gesture_classifier.pt"
+    model_path.touch()
+    service = StudentObservationService(
+        tmp_path,
+        observation_config(model_path),
+        model_loader=lambda _path: Predictor(),
+        notch_option=option,
+    )
+    external_expected = expected[0] if isinstance(expected, tuple) and len(expected) == 1 else expected
+    assert notch_spec_from_option(option) == external_expected
+    left = service._runtime["left"].processor.config.notch_freq
+    right = service._runtime["right"].processor.config.notch_freq
+    assert left == expected
+    assert right == expected
+
+
+def test_teacher_display_notch_does_not_change_a_raw_model_input(tmp_path) -> None:
+    model_path = tmp_path / "gesture_classifier.pt"
+    model_path.touch()
+    service = StudentObservationService(
+        tmp_path,
+        observation_config(model_path),
+        model_loader=lambda _path: RawPredictor(),
+        notch_option="50+100Hz",
+    )
+    packets = [Packet(i / 250.0, i, np.full(8, float(i + 1))) for i in range(8)]
+    service.on_emg_packets("left", packets)
+    service.start(left_ready=True, right_ready=False)
+    try:
+        decoder = service.decoder_for("left")
+        assert decoder is not None
+        assert decoder.signal_type == "raw"
+        assert decoder._buffer_for_signal_type() is decoder.raw_emg_buffer
     finally:
         service.stop()
 
@@ -202,7 +257,8 @@ def test_view_signals_gate_allows_one_ready_hand_and_home_stops_runtime(app) -> 
         window.open_course_page(entry)
         assert window._stack.currentWidget() is window.signal_observation_gate_page
 
-        device_service.result_changed.emit(_healthy_single_hand_result())
+        device_service.result = _healthy_single_hand_result()
+        device_service.result_changed.emit(device_service.result)
         app.processEvents()
         window.open_course_page(entry)
         assert window._stack.currentWidget() is window.signal_observation_page
@@ -214,5 +270,36 @@ def test_view_signals_gate_allows_one_ready_hand_and_home_stops_runtime(app) -> 
         assert window._stack.currentWidget() is window.home_page
         assert not window.signal_observation_page._timer.isActive()
         assert not window.observation_service.active
+    finally:
+        window.close()
+
+
+def test_dual_hand_check_keeps_both_sources_ready_when_observation_opens(app) -> None:
+    device_service = DeviceCheckService(
+        simulate=True,
+        thresholds=DeviceCheckThresholds(
+            observe_duration_ms=250,
+            min_samples=10,
+            min_rate_sps=1.0,
+            max_rate_sps=1000.0,
+        ),
+    )
+    device_service.start()
+    QTest.qWait(450)
+    app.processEvents()
+    assert device_service.result.left.ready_for_collection is True
+    assert device_service.result.right.ready_for_collection is True
+
+    window = StudentMainWindow(
+        paths=resolve_project_paths(),
+        device_check_service=device_service,
+    )
+    try:
+        assert window.session_device_result.left.ready_for_collection is True
+        assert window.session_device_result.right.ready_for_collection is True
+        entry = next(item for item in window.course_entries if item.identifier == "view-signals")
+        window.open_course_page(entry)
+        assert window.signal_observation_page._ready_sides == {"left": True, "right": True}
+        assert len(device_service._sources) == 2
     finally:
         window.close()

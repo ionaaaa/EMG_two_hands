@@ -39,6 +39,7 @@ from emg_live_marker.realtime.student_control_optimization import StudentControl
 from emg_live_marker.realtime.student_competition import StudentCompetitionService
 from emg_live_marker.realtime.teacher_classroom import (
     load_bracelet_assignment,
+    load_signal_processing,
     merge_classroom_overrides,
 )
 from emg_live_marker.realtime.student_personal_training import StudentPersonalTrainingService
@@ -132,6 +133,7 @@ class StudentMainWindow(QMainWindow):
         self.course_entry_buttons: list[QPushButton] = []
         self._entry_page_indexes: dict[str, int] = {}
         self.bracelet_assignment = load_bracelet_assignment(classroom_settings_path)
+        self.signal_processing = load_signal_processing(classroom_settings_path)
         assigned_provider = (
             AssignedSerialDeviceProvider(
                 self.bracelet_assignment["left_port"],
@@ -159,6 +161,7 @@ class StudentMainWindow(QMainWindow):
         self.observation_service = StudentObservationService(
             self.paths.project_root,
             self.course_config,
+            notch_option=self.signal_processing["notch"],
             parent=self,
         )
         self.game_mapping_service = game_mapping_service or GameMappingService(
@@ -365,9 +368,11 @@ class StudentMainWindow(QMainWindow):
             if not self.session_device_result.collection_ready:
                 self._stack.setCurrentIndex(self._signal_observation_gate_index)
                 return
+            current_result = self.device_check_service.ensure_checked_sources_running()
+            self.session_device_result = current_result
             self.signal_observation_page.start(
-                left_ready=self.session_device_result.left.ready_for_collection,
-                right_ready=self.session_device_result.right.ready_for_collection,
+                left_ready=current_result.left.ready_for_collection,
+                right_ready=current_result.right.ready_for_collection,
             )
         if entry.identifier == "configure-game":
             self.game_mapping_page.activate()

@@ -19,6 +19,7 @@ from emg_live_marker.realtime.classroom_storage import (
     ClassroomStorageError,
     default_app_data_root,
 )
+from emg_live_marker.realtime.signal_processing import normalize_notch_option
 
 
 def load_teaching_course_config(project_root: Path) -> dict[str, Any]:
@@ -58,6 +59,24 @@ def load_bracelet_assignment(settings_path: Path | None = None) -> dict[str, str
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         return None
     return bracelet_assignment_from_settings(payload)
+
+
+def signal_processing_from_settings(payload: object) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        return {"notch": "Off"}
+    processing = payload.get("signal_processing")
+    if not isinstance(processing, dict):
+        return {"notch": "Off"}
+    return {"notch": normalize_notch_option(processing.get("notch", "Off"))}
+
+
+def load_signal_processing(settings_path: Path | None = None) -> dict[str, str]:
+    path = Path(settings_path or default_classroom_settings_path())
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {"notch": "Off"}
+    return signal_processing_from_settings(payload)
 
 
 def merge_classroom_overrides(
@@ -160,6 +179,7 @@ class TeacherClassroomService(QObject):
         self._model_loader = model_loader or load_model
         self._base_settings = self._settings_from_course(course_config)
         self.bracelet_assignment: dict[str, str] | None = None
+        self.signal_processing: dict[str, str] = {"notch": "Off"}
         self.settings = self.load_settings()
 
     def load_settings(self) -> ClassroomSettings:
@@ -175,6 +195,7 @@ class TeacherClassroomService(QObject):
             payload = {}
         password_enabled = bool(payload.get("teacher_password_enabled", False)) if isinstance(payload, dict) else False
         self.bracelet_assignment = bracelet_assignment_from_settings(payload)
+        self.signal_processing = signal_processing_from_settings(payload)
         self.settings = ClassroomSettings(
             settings.standard_model_path,
             settings.trials_per_action,
@@ -205,6 +226,19 @@ class TeacherClassroomService(QObject):
             return False, "左右手环分配保存失败，请检查应用数据目录。"
         self.bracelet_assignment = dict(payload["bracelet_assignment"])
         return True, "左右手环分配已保存。"
+
+    def save_signal_processing(self, notch: object) -> tuple[bool, str]:
+        option = normalize_notch_option(notch)
+        payload = self._read_settings_payload()
+        payload["signal_processing"] = {"notch": option}
+        payload.setdefault("schema_version", 1)
+        try:
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            self._write_json(self.settings_path, payload)
+        except OSError:
+            return False, "信号处理设置保存失败，请检查应用数据目录。"
+        self.signal_processing = dict(payload["signal_processing"])
+        return True, "信号处理设置已保存。"
 
     @property
     def configured_standard_model_path(self) -> Path | None:
