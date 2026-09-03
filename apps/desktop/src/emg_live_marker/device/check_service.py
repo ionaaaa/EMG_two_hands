@@ -146,6 +146,21 @@ class SideCheckResult:
             and self.rate_stable
         )
 
+    @property
+    def observation_available(self) -> bool:
+        """Whether this connected side has a structurally usable EMG stream.
+
+        Observation deliberately has a lower bar than formal collection: flat
+        signal or a short-lived unstable rate still produces real waveforms and
+        can be decoded, while NaN/Inf and absent data cannot.
+        """
+
+        return (
+            self.connection is ConnectionState.CONNECTED
+            and self.received_emg
+            and self.reason not in {CheckReason.NO_EMG_DATA, CheckReason.INVALID_VALUES}
+        )
+
 
 @dataclass(frozen=True)
 class DeviceCheckResult:
@@ -158,6 +173,10 @@ class DeviceCheckResult:
     @property
     def collection_ready(self) -> bool:
         return self.left.ready_for_collection or self.right.ready_for_collection
+
+    @property
+    def observation_available(self) -> bool:
+        return self.left.observation_available or self.right.observation_available
 
     @property
     def signal_status(self) -> str:

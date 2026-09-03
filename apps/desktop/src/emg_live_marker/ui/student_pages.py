@@ -1034,8 +1034,24 @@ class StudentSignalObservationPage(QWidget):
         setattr(self, f"{side}_probability_label", probabilities)
         return waveform, panel
 
-    def start(self, *, left_ready: bool, right_ready: bool) -> None:
-        self.set_ready_sides(left_ready, right_ready)
+    def start(
+        self,
+        *,
+        left_ready: bool,
+        right_ready: bool,
+        left_collection_ready: bool | None = None,
+        right_collection_ready: bool | None = None,
+        left_connected: bool | None = None,
+        right_connected: bool | None = None,
+    ) -> None:
+        self.set_observation_sides(
+            left_available=left_ready,
+            right_available=right_ready,
+            left_collection_ready=(left_ready if left_collection_ready is None else left_collection_ready),
+            right_collection_ready=(right_ready if right_collection_ready is None else right_collection_ready),
+            left_connected=(left_ready if left_connected is None else left_connected),
+            right_connected=(right_ready if right_connected is None else right_connected),
+        )
         self.service.start(left_ready=left_ready, right_ready=right_ready)
         self.model_message_label.setText(self.service.model_error)
         self._timer.start()
@@ -1046,15 +1062,52 @@ class StudentSignalObservationPage(QWidget):
         self.service.stop()
 
     def set_ready_sides(self, left_ready: bool, right_ready: bool) -> None:
-        self._ready_sides = {"left": bool(left_ready), "right": bool(right_ready)}
-        self.service.update_ready_sides(left_ready=left_ready, right_ready=right_ready)
+        """Backward-compatible alias for callers that only know availability."""
+
+        self.set_observation_sides(
+            left_available=left_ready,
+            right_available=right_ready,
+            left_collection_ready=left_ready,
+            right_collection_ready=right_ready,
+            left_connected=left_ready,
+            right_connected=right_ready,
+        )
+
+    def set_observation_sides(
+        self,
+        *,
+        left_available: bool,
+        right_available: bool,
+        left_collection_ready: bool,
+        right_collection_ready: bool,
+        left_connected: bool,
+        right_connected: bool,
+    ) -> None:
+        self._ready_sides = {"left": bool(left_available), "right": bool(right_available)}
+        self.service.update_ready_sides(left_ready=left_available, right_ready=right_available)
+        collection_ready = {
+            "left": bool(left_collection_ready),
+            "right": bool(right_collection_ready),
+        }
+        connected = {"left": bool(left_connected), "right": bool(right_connected)}
         for side, ready in self._ready_sides.items():
             status = getattr(self, f"{side}_status_label")
-            status.setText("已连接" if ready else "未连接")
-            status.setStyleSheet(
-                "font-weight: 600; color: #137333;" if ready else "font-weight: 600; color: #b42318;"
-            )
-            if not ready:
+            if ready:
+                quality_pending = not collection_ready[side]
+                status.setText("已连接 · 信号质量待调整" if quality_pending else "已连接")
+                status.setStyleSheet(
+                    "font-weight: 600; color: #b26a00;"
+                    if quality_pending
+                    else "font-weight: 600; color: #137333;"
+                )
+            else:
+                if connected[side]:
+                    status.setText("已连接 · 等待信号")
+                    status.setStyleSheet("font-weight: 600; color: #b26a00;")
+                else:
+                    status.setText("未连接")
+                    status.setStyleSheet("font-weight: 600; color: #b42318;")
+            if not ready and not connected[side]:
                 getattr(self, f"{side}_result_label").setText("当前手势：--    置信度：--")
                 getattr(self, f"{side}_probability_label").setText(self._probability_text({}))
                 getattr(self, f"{side}_waveform_view").clear()

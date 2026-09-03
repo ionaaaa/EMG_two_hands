@@ -292,6 +292,32 @@ def test_disconnection_after_completion_updates_result(app, thresholds) -> None:
         service.close()
 
 
+@pytest.mark.parametrize("reason", [CheckReason.FLAT_SIGNAL, CheckReason.UNSTABLE_RATE])
+def test_connected_quality_warning_is_observable_but_not_collection_ready(reason) -> None:
+    result = SideCheckResult(
+        "left",
+        ConnectionState.CONNECTED,
+        reason,
+        received_emg=True,
+        valid_samples=True,
+        signal_healthy=reason is CheckReason.UNSTABLE_RATE,
+    )
+    assert result.observation_available is True
+    assert result.ready_for_collection is False
+
+
+def test_disconnected_side_is_not_available_for_observation() -> None:
+    result = SideCheckResult(
+        "left",
+        ConnectionState.DISCONNECTED,
+        CheckReason.NO_EMG_DATA,
+        received_emg=True,
+        valid_samples=True,
+    )
+    assert result.observation_available is False
+    assert result.ready_for_collection is False
+
+
 def test_observation_keeps_verified_two_hand_sources_and_recovers_only_right(app, thresholds) -> None:
     service, sources = run_check(
         app,

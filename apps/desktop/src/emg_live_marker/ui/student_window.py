@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from emg_live_marker.device.check_service import (
     AssignedSerialDeviceProvider,
+    ConnectionState,
     DeviceCheckResult,
     DeviceCheckService,
     DeviceCheckThresholds,
@@ -368,14 +369,18 @@ class StudentMainWindow(QMainWindow):
             self._stack.setCurrentIndex(self._collection_gate_index)
             return
         if entry.identifier == "view-signals":
-            if not self.session_device_result.collection_ready:
+            if not self.session_device_result.observation_available:
                 self._stack.setCurrentIndex(self._signal_observation_gate_index)
                 return
             current_result = self.device_check_service.ensure_checked_sources_running()
             self.session_device_result = current_result
             self.signal_observation_page.start(
-                left_ready=current_result.left.ready_for_collection,
-                right_ready=current_result.right.ready_for_collection,
+                left_ready=current_result.left.observation_available,
+                right_ready=current_result.right.observation_available,
+                left_collection_ready=current_result.left.ready_for_collection,
+                right_collection_ready=current_result.right.ready_for_collection,
+                left_connected=current_result.left.connection is ConnectionState.CONNECTED,
+                right_connected=current_result.right.connection is ConnectionState.CONNECTED,
             )
         if entry.identifier == "configure-game":
             self.game_mapping_page.activate()
@@ -408,9 +413,13 @@ class StudentMainWindow(QMainWindow):
             result.left.ready_for_collection,
             result.right.ready_for_collection,
         )
-        self.signal_observation_page.set_ready_sides(
-            result.left.ready_for_collection,
-            result.right.ready_for_collection,
+        self.signal_observation_page.set_observation_sides(
+            left_available=result.left.observation_available,
+            right_available=result.right.observation_available,
+            left_collection_ready=result.left.ready_for_collection,
+            right_collection_ready=result.right.ready_for_collection,
+            left_connected=result.left.connection is ConnectionState.CONNECTED,
+            right_connected=result.right.connection is ConnectionState.CONNECTED,
         )
         self.collection_controller.check_device_state()
 

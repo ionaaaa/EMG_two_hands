@@ -236,6 +236,50 @@ def test_page_exposes_only_three_student_modes_and_chinese_results(app, tmp_path
     assert not page._timer.isActive()
 
 
+def test_observation_page_keeps_connected_quality_warning_stream_running(app, tmp_path) -> None:
+    model_path = tmp_path / "gesture_classifier.pt"
+    model_path.touch()
+    service = StudentObservationService(
+        tmp_path,
+        observation_config(model_path),
+        model_loader=lambda _path: Predictor(),
+    )
+    packets = [Packet(i / 250.0, i, np.full(8, float(i + 1))) for i in range(8)]
+    service.on_emg_packets("left", packets)
+    service.on_emg_packets("right", packets)
+    page = StudentSignalObservationPage(service, lambda: None)
+    try:
+        page.start(
+            left_ready=True,
+            right_ready=True,
+            left_collection_ready=False,
+            right_collection_ready=True,
+        )
+        page.refresh_waveforms()
+        assert "已连接" in page.left_status_label.text()
+        assert "信号质量待调整" in page.left_status_label.text()
+        assert page.right_status_label.text() == "已连接"
+        assert service.decoder_for("left") is not None
+        assert service.decoder_for("right") is not None
+        assert page.left_waveform_view._curves[0].getData()[0].size > 0
+
+        page.set_observation_sides(
+            left_available=False,
+            right_available=True,
+            left_collection_ready=False,
+            right_collection_ready=True,
+            left_connected=False,
+            right_connected=True,
+        )
+        assert page.left_status_label.text() == "未连接"
+        assert page.right_status_label.text() == "已连接"
+        assert service.decoder_for("left") is None
+        assert service.decoder_for("right") is not None
+    finally:
+        page.stop()
+        page.close()
+
+
 @pytest.mark.parametrize("mode", list(Y_RANGE_OPTIONS))
 def test_teacher_y_range_is_applied_to_both_student_views_only(app, tmp_path, mode) -> None:
     service = StudentObservationService(
@@ -272,6 +316,18 @@ def _healthy_single_hand_result() -> DeviceCheckResult:
     return DeviceCheckResult(healthy, missing, checking=False, message="检查完成")
 
 
+def _observable_but_not_collection_ready_result() -> DeviceCheckResult:
+    flat = SideCheckResult(
+        "left",
+        ConnectionState.CONNECTED,
+        CheckReason.FLAT_SIGNAL,
+        received_emg=True,
+        valid_samples=True,
+    )
+    missing = SideCheckResult("right", ConnectionState.DISCONNECTED, CheckReason.NO_DEVICE)
+    return DeviceCheckResult(flat, missing, checking=False, message="检查完成")
+
+
 def test_view_signals_gate_allows_one_ready_hand_and_home_stops_runtime(app) -> None:
     device_service = DeviceCheckService()
     window = StudentMainWindow(
@@ -296,6 +352,30 @@ def test_view_signals_gate_allows_one_ready_hand_and_home_stops_runtime(app) -> 
         assert window._stack.currentWidget() is window.home_page
         assert not window.signal_observation_page._timer.isActive()
         assert not window.observation_service.active
+    finally:
+        window.close()
+
+
+def test_observation_accepts_connected_quality_warning_but_collection_stays_gated(app) -> None:
+    device_service = DeviceCheckService()
+    window = StudentMainWindow(
+        paths=resolve_project_paths(),
+        device_check_service=device_service,
+    )
+    try:
+        device_service.result = _observable_but_not_collection_ready_result()
+        device_service.result_changed.emit(device_service.result)
+        app.processEvents()
+        signal_entry = next(item for item in window.course_entries if item.identifier == "view-signals")
+        collection_entry = next(item for item in window.course_entries if item.identifier == "collect-gestures")
+        window.open_course_page(signal_entry)
+        assert window._stack.currentWidget() is window.signal_observation_page
+        assert "已连接" in window.signal_observation_page.left_status_label.text()
+        assert "信号质量待调整" in window.signal_observation_page.left_status_label.text()
+        assert window.observation_service.ready_sides["left"] is True
+
+        window.open_course_page(collection_entry)
+        assert window._stack.currentWidget() is window.collection_gate_page
     finally:
         window.close()
 
