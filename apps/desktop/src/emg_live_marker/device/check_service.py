@@ -17,7 +17,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from emg_live_marker.config import DEFAULT_BAUDRATE, DEFAULT_DISPLAY_OUTLIER_UV
-from emg_live_marker.device.protocol import EMG_CHANNELS
+from emg_live_marker.device.protocol import EMG_CHANNELS, EMG_FS
 from emg_live_marker.device.serial_source import SerialSource, list_serial_ports
 from emg_live_marker.device.simulator import SimulatedDevice, SimulatorConfig
 
@@ -104,6 +104,9 @@ class DeviceCheckThresholds:
     max_rate_spread_sps: float = 40.0
     flat_channel_std_uv: float = 0.5
     max_abs_value_uv: float = DEFAULT_DISPLAY_OUTLIER_UV
+    abnormal_percentile: float = 99.5
+    max_abnormal_sample_ratio: float = 0.01
+    max_consecutive_abnormal_ms: float = 40.0
 
     @classmethod
     def from_config(cls, config: object) -> DeviceCheckThresholds:
@@ -120,6 +123,31 @@ class DeviceCheckThresholds:
                 max_rate_spread_sps=max(0.0, float(values.get("max_rate_spread_sps", defaults.max_rate_spread_sps))),
                 flat_channel_std_uv=max(0.0, float(values.get("flat_channel_std_uv", defaults.flat_channel_std_uv))),
                 max_abs_value_uv=max(1.0, float(values.get("max_abs_value_uv", defaults.max_abs_value_uv))),
+                abnormal_percentile=min(
+                    100.0,
+                    max(0.0, float(values.get("abnormal_percentile", defaults.abnormal_percentile))),
+                ),
+                max_abnormal_sample_ratio=min(
+                    1.0,
+                    max(
+                        0.0,
+                        float(
+                            values.get(
+                                "max_abnormal_sample_ratio",
+                                defaults.max_abnormal_sample_ratio,
+                            )
+                        ),
+                    ),
+                ),
+                max_consecutive_abnormal_ms=max(
+                    0.0,
+                    float(
+                        values.get(
+                            "max_consecutive_abnormal_ms",
+                            defaults.max_consecutive_abnormal_ms,
+                        )
+                    ),
+                ),
             )
         except (TypeError, ValueError):
             return cls()
@@ -552,7 +580,7 @@ class DeviceCheckService(QObject):
             return SideCheckResult(side, ConnectionState.CONNECTED, CheckReason.INVALID_VALUES, received_emg=True)
         if samples.shape[0] < self.thresholds.min_samples:
             return SideCheckResult(side, ConnectionState.CONNECTED, CheckReason.INSUFFICIENT_SAMPLES, received_emg=True)
-        if np.max(np.abs(samples)) > self.thresholds.max_abs_value_uv:
+        if self._has_persistent_abnormal_amplitude(samples):
             return SideCheckResult(side, ConnectionState.CONNECTED, CheckReason.ABNORMAL_CHANNEL, received_emg=True)
         channel_std = np.std(samples, axis=0)
         if np.any(channel_std < self.thresholds.flat_channel_std_uv):
@@ -584,6 +612,43 @@ class DeviceCheckService(QObject):
             return np.vstack(samples)
         except ValueError:
             return np.asarray(samples, dtype=np.float64)
+
+    def _has_persistent_abnormal_amplitude(self, samples: np.ndarray) -> bool:
+        """Flag one channel only when its high amplitude is persistent.
+
+        A single peak is intentionally insufficient: every channel is judged
+        independently by its absolute-value percentile plus either its
+        over-limit sample ratio or longest contiguous over-limit duration.
+        """
+
+        limit = self.thresholds.max_abs_value_uv
+        absolute_samples = np.abs(np.asarray(samples, dtype=np.float64))
+        for channel in range(absolute_samples.shape[1]):
+            values = absolute_samples[:, channel]
+            percentile = float(np.percentile(values, self.thresholds.abnormal_percentile))
+            if percentile <= limit:
+                continue
+            exceeds = values > limit
+            exceed_ratio = float(np.mean(exceeds))
+            longest = self._longest_consecutive_true(exceeds)
+            longest_ms = float(longest) * 1000.0 / float(EMG_FS)
+            if (
+                exceed_ratio >= self.thresholds.max_abnormal_sample_ratio
+                or longest_ms >= self.thresholds.max_consecutive_abnormal_ms
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _longest_consecutive_true(values: np.ndarray) -> int:
+        longest = current = 0
+        for value in np.asarray(values, dtype=bool):
+            if value:
+                current += 1
+                longest = max(longest, current)
+            else:
+                current = 0
+        return longest
 
     def _rate_is_stable(self, side: BraceletSide) -> bool:
         rates = np.asarray(self._rates[side], dtype=np.float64)

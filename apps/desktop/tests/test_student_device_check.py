@@ -19,6 +19,7 @@ from emg_live_marker.device.check_service import (
     DeviceDescriptor,
     SideCheckResult,
 )
+from emg_live_marker.device.protocol import EMG_FS
 from emg_live_marker.paths import resolve_project_paths
 from emg_live_marker.ui.student_window import StudentMainWindow
 
@@ -315,6 +316,79 @@ def test_disconnected_side_is_not_available_for_observation() -> None:
         valid_samples=True,
     )
     assert result.observation_available is False
+    assert result.ready_for_collection is False
+
+
+def _amplitude_service(**threshold_values) -> DeviceCheckService:
+    thresholds = DeviceCheckThresholds(
+        min_samples=1,
+        **threshold_values,
+    )
+    return DeviceCheckService(thresholds=thresholds)
+
+
+def test_single_slight_amplitude_spike_does_not_fail_abnormal_channel_check() -> None:
+    samples = np.full((200, 8), 100.0)
+    samples[50, 3] = 20608.0
+    service = _amplitude_service()
+    try:
+        assert service._has_persistent_abnormal_amplitude(samples) is False
+    finally:
+        service.close()
+
+
+def test_sparse_discrete_amplitude_exceedances_below_ratio_do_not_fail() -> None:
+    samples = np.full((400, 8), 100.0)
+    samples[[10, 120, 250], 2] = 43000.0
+    service = _amplitude_service()
+    try:
+        assert service._has_persistent_abnormal_amplitude(samples) is False
+    finally:
+        service.close()
+
+
+def test_per_channel_exceed_ratio_is_not_diluted_by_other_channels() -> None:
+    samples = np.full((200, 8), 100.0)
+    samples[:4, 6] = 43000.0
+    service = _amplitude_service()
+    try:
+        assert service._has_persistent_abnormal_amplitude(samples) is True
+    finally:
+        service.close()
+
+
+def test_consecutive_exceedance_uses_emg_sampling_rate_for_duration() -> None:
+    consecutive = int(round(40.0 * EMG_FS / 1000.0))
+    samples = np.full((200, 8), 100.0)
+    samples[40 : 40 + consecutive, 1] = 43000.0
+    service = _amplitude_service(max_abnormal_sample_ratio=0.20)
+    try:
+        assert service._has_persistent_abnormal_amplitude(samples) is True
+    finally:
+        service.close()
+
+
+def test_sustained_high_amplitude_and_boundary_value_are_distinguished() -> None:
+    sustained = np.full((200, 8), 100.0)
+    sustained[:, 0] = 43000.0
+    boundary = np.full((200, 8), 20000.0)
+    service = _amplitude_service()
+    try:
+        assert service._has_persistent_abnormal_amplitude(sustained) is True
+        assert service._has_persistent_abnormal_amplitude(boundary) is False
+    finally:
+        service.close()
+
+
+def test_abnormal_channel_remains_observable_but_not_collection_ready() -> None:
+    result = SideCheckResult(
+        "left",
+        ConnectionState.CONNECTED,
+        CheckReason.ABNORMAL_CHANNEL,
+        received_emg=True,
+        valid_samples=True,
+    )
+    assert result.observation_available is True
     assert result.ready_for_collection is False
 
 

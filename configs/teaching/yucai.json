@@ -127,6 +127,9 @@
     "max_rate_spread_sps": 40.0,
     "flat_channel_std_uv": 0.5,
     "max_abs_value_uv": 20000.0,
+    "abnormal_percentile": 99.5,
+    "max_abnormal_sample_ratio": 0.01,
+    "max_consecutive_abnormal_ms": 40.0,
     "trial_min_sample_ratio": 0.8
   },
   "student_mode": {
